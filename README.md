@@ -72,6 +72,24 @@ Prochaines étapes prioritaires / Next priority milestones :
 
 ---
 
+## Dépendances / Dependencies
+
+| Bibliothèque | Version | Licence | Chargement |
+|---|---|---|---|
+| [Three.js](https://threejs.org) | r128 | MIT | CDN Cloudflare |
+
+Three.js est la seule dépendance externe. Elle est chargée automatiquement depuis le CDN Cloudflare au premier usage. **Sans connexion internet**, la visualisation 3D ne fonctionnera pas — le G-code est néanmoins généré et exportable normalement.
+
+Pour un usage **100% hors-ligne** : télécharge [`three.min.js`](https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js) et modifie la balise `<script>` dans le HTML pour pointer vers le fichier local.
+
+> Three.js — Copyright © 2010-2024 three.js authors — [MIT License](https://github.com/mrdoob/three.js/blob/dev/LICENSE)
+
+---
+
+Three.js is the only external dependency, loaded automatically from the Cloudflare CDN. **Offline use**: download [`three.min.js`](https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js) and update the `<script>` tag in the HTML to point to the local file. G-code generation works offline regardless.
+
+---
+
 ## Licence / License
 
 [MIT](./LICENSE) — libre d'utilisation, de modification et de distribution avec mention de l'auteur.  

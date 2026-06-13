@@ -456,6 +456,11 @@ function writeGCode(waypoints, params) {
   if (isGrbl) lines.push('%');
   lines.push('; =====================================================');
   lines.push('; G-Code 3D — Usinage simultané XYZ');
+  lines.push('; Généré par : Magic GCode Generator');
+  lines.push('; Auteur     : Marc FONTAINE');
+  lines.push('; Licence    : MIT — github.com/Marc-FabLabBEN/Magic_GCode_Generator');
+  lines.push('; Moteur 3D  : Three.js r128 — Copyright (c) 2010-2024 three.js authors (MIT)');
+  lines.push('; =====================================================');
   lines.push(`; Généré le : ${new Date().toLocaleString('fr-FR')}`);
   lines.push(`; Outil     : ${toolType === 'ball' ? 'Bout sphérique' : 'Bout plat'} Ø${toolDiam} mm`);
   lines.push(`; Avance    : ${feedRate} mm/min | Plongée : ${plungeRate} mm/min`);
