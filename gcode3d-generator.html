@@ -1,0 +1,1127 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>G-Code 3D — Générateur d'usinage XYZ simultané</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{display:flex;height:100vh;overflow:hidden;background:#0a141e;color:#c0d0e0;font-family:'Courier New',monospace;font-size:12px;}
+
+/* ── Panneau gauche ── */
+#panel{width:315px;min-width:315px;background:#0f1e2e;border-right:1px solid #1a3050;overflow-y:auto;display:flex;flex-direction:column;}
+#panel h1{padding:11px 14px;background:#0a2848;color:#4fc3f7;font-size:11px;letter-spacing:1.5px;border-bottom:1px solid #1a3050;flex-shrink:0;}
+
+.sec{padding:10px 14px;border-bottom:1px solid #162840;}
+.sec-t{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:#4fc3f7;margin-bottom:8px;opacity:.8;}
+
+.field{margin-bottom:7px;}
+label{display:block;font-size:10px;color:#6888a0;margin-bottom:2px;}
+label.chk{display:inline-flex;align-items:center;gap:5px;cursor:pointer;color:#88a8c0;font-size:11px;}
+
+input[type=number],input[type=text],select{
+  width:100%;background:#081422;border:1px solid #1a3050;color:#c0d0e0;
+  padding:4px 7px;font-family:inherit;font-size:11px;border-radius:3px;outline:none;
+}
+input:focus,select:focus{border-color:#4fc3f7;}
+input[readonly]{opacity:.55;cursor:default;}
+input[type=checkbox]{width:auto;accent-color:#4fc3f7;cursor:pointer;}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:7px;}
+
+.btn{width:100%;padding:7px 10px;border:none;border-radius:3px;font-family:inherit;font-size:11px;cursor:pointer;font-weight:bold;letter-spacing:.5px;transition:opacity .15s, background .15s;}
+.btn:disabled{opacity:.3;cursor:not-allowed;}
+.btn:hover:not(:disabled){opacity:.82;}
+.btn-load{background:#112040;color:#4fc3f7;border:1px solid #4fc3f7;}
+.btn-gen{background:#4fc3f7;color:#060e18;}
+.btn-dl{background:#4caf50;color:#060e18;}
+
+.bar{height:3px;background:#162840;border-radius:2px;margin-top:7px;overflow:hidden;}
+.bar-fill{height:100%;background:#4fc3f7;width:0%;transition:width .08s;}
+
+.status{font-size:10px;padding:4px 8px;border-radius:2px;margin-top:5px;display:none;line-height:1.4;}
+.status.ok{background:#0d2a1a;color:#4caf50;border-left:2px solid #4caf50;display:block;}
+.status.err{background:#2a0d0d;color:#ef5350;border-left:2px solid #ef5350;display:block;}
+.status.inf{background:#0d1e36;color:#4fc3f7;border-left:2px solid #4fc3f7;display:block;}
+
+.stats{font-size:10px;color:#4a6880;margin-top:5px;line-height:1.8;}
+.stats b{color:#80a8c0;}
+
+/* ── Zone 3D ── */
+#viewer{flex:1;position:relative;background:#060e18;}
+#canvas3d{display:block;width:100%;height:100%;}
+#hint{position:absolute;bottom:10px;right:12px;font-size:9px;color:#182840;pointer-events:none;line-height:1.7;text-align:right;}
+
+input[type=file]{display:none;}
+::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:#081422;}::-webkit-scrollbar-thumb{background:#1a3050;border-radius:2px;}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════ PANNEAU GAUCHE ═══════════════ -->
+<div id="panel">
+  <h1>⚙ G-CODE 3D — USINAGE SIMULTANÉ XYZ</h1>
+
+  <div class="sec">
+    <div class="sec-t">Fichier STL</div>
+    <input type="file" id="stlFile" accept=".stl">
+    <button class="btn btn-load" onclick="document.getElementById('stlFile').click()">
+      📂 Charger un fichier STL…
+    </button>
+    <div class="status" id="fileStatus"></div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t">Brut</div>
+    <div class="row2">
+      <div class="field">
+        <label>Longueur X (mm)</label>
+        <input type="number" id="stockX" value="100" min="0.1" step="1">
+      </div>
+      <div class="field">
+        <label>Largeur Y (mm)</label>
+        <input type="number" id="stockY" value="100" min="0.1" step="1">
+      </div>
+    </div>
+    <div class="field">
+      <label>Hauteur Z (mm)</label>
+      <input type="number" id="stockZ" value="30" min="0.1" step="1">
+    </div>
+    <div style="font-size:10px;color:#4fc3f7;background:#0a1929;border:1px solid #1a3050;padding:5px 8px;border-radius:3px;line-height:1.5;margin-top:2px;">
+      ⊙ Origine : sommet du brut, coin bas-gauche (X0 Y0 Z0)
+    </div>
+    <div class="status" id="stockStatus"></div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t">Outil</div>
+    <div class="row2">
+      <div class="field">
+        <label>Diamètre (mm)</label>
+        <input type="number" id="toolDiam" value="6" min="0.1" step="0.1">
+      </div>
+      <div class="field">
+        <label>Type d'outil</label>
+        <select id="toolType">
+          <option value="ball">Bout sphérique</option>
+          <option value="flat">Bout plat</option>
+        </select>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>Pas latéral (% diam.)</label>
+        <input type="number" id="stepPct" value="40" min="1" max="100" step="1">
+      </div>
+      <div class="field">
+        <label>= pas calculé (mm)</label>
+        <input type="number" id="stepMm" value="2.4" step="0.01" readonly>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t">Paramètres de coupe</div>
+    <div class="row2">
+      <div class="field">
+        <label>Avance XY (mm/min)</label>
+        <input type="number" id="feedRate" value="850" min="1">
+      </div>
+      <div class="field">
+        <label>Plongée Z (mm/min)</label>
+        <input type="number" id="plungeRate" value="300" min="1">
+      </div>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>Broche (tr/min)</label>
+        <input type="number" id="spindleRPM" value="14500" min="0">
+      </div>
+      <div class="field">
+        <label>Hauteur sécurité (mm)</label>
+        <input type="number" id="safetyZ" value="10" min="0.5" step="0.5">
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t">Stratégie & machine</div>
+    <div class="row2">
+      <div class="field">
+        <label>Direction de balayage</label>
+        <select id="scanDir">
+          <option value="x">Raster X (lignes →)</option>
+          <option value="y">Raster Y (lignes ↑)</option>
+          <option value="xy">Croisé X + Y</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Contrôleur</label>
+        <select id="controller">
+          <option value="grbl">GRBL</option>
+          <option value="mach3">Mach3 / Mach4</option>
+          <option value="linuxcnc">LinuxCNC</option>
+        </select>
+      </div>
+    </div>
+    <div class="field">
+      <label>Origine pièce (définit X0 Y0 Z0)</label>
+      <select id="origin">
+        <option value="stock">Sommet du brut — coin bas-gauche (défaut)</option>
+        <option value="top-center">Centre XY — sommet pièce = Z0</option>
+        <option value="corner-top">Coin avant-gauche — sommet = Z0</option>
+        <option value="model">Conserver les coordonnées STL brutes</option>
+        <option value="custom">Coordonnées manuelles XYZ…</option>
+      </select>
+    </div>
+    <!-- Inputs visibles uniquement si "custom" -->
+    <div id="originCustomDiv" style="display:none;margin-top:4px;padding:8px;background:#0a1929;border:1px solid #1a3050;border-radius:3px;">
+      <div style="font-size:9px;color:#4a6880;margin-bottom:6px;line-height:1.5;">
+        Coordonnées STL du point qui deviendra X0 Y0 Z0 en G-code.<br>
+        <span id="bboxHint" style="color:#3a5870;"></span>
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label>X origine (mm)</label>
+          <input type="number" id="originX" value="0" step="0.001">
+        </div>
+        <div class="field">
+          <label>Y origine (mm)</label>
+          <input type="number" id="originY" value="0" step="0.001">
+        </div>
+      </div>
+      <div class="field">
+        <label>Z origine (mm)</label>
+        <input type="number" id="originZ" value="0" step="0.001">
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t">Calcul du parcours</div>
+    <button class="btn btn-gen" id="btnGen" disabled>▶ Calculer le parcours outil</button>
+    <div class="bar"><div class="bar-fill" id="progFill"></div></div>
+    <div class="status" id="genStatus"></div>
+    <div class="stats" id="genStats"></div>
+    <br>
+    <button class="btn btn-dl" id="btnDl" disabled>⬇ Télécharger le fichier .gcode</button>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t">Affichage 3D</div>
+    <div class="field"><label class="chk"><input type="checkbox" id="chkModel" checked> Modèle STL</label></div>
+    <div class="field"><label class="chk"><input type="checkbox" id="chkStock" checked> Brut (stock)</label></div>
+    <div class="field"><label class="chk"><input type="checkbox" id="chkPath" checked> Parcours outil</label></div>
+    <div class="field"><label class="chk"><input type="checkbox" id="chkAxes" checked> Axes X / Y / Z</label></div>
+    <button class="btn btn-load" id="btnCenter" style="margin-top:6px">↺ Recadrer la vue</button>
+  </div>
+</div>
+
+<!-- ═══════════════ VUE 3D ═══════════════ -->
+<div id="viewer">
+  <canvas id="canvas3d"></canvas>
+  <div id="hint">
+    Glisser gauche : rotation<br>
+    Glisser droit / Ctrl : pan<br>
+    Molette : zoom
+  </div>
+</div>
+
+<!-- ═══════════════ SCRIPT ═══════════════ -->
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════════════
+// 1 — PARSING STL (binaire + ASCII)
+// ═══════════════════════════════════════════════════════════════
+
+function parseSTL(buffer) {
+  // Détection binaire : taille attendue = 84 + N*50 octets
+  const view = new DataView(buffer);
+  if (buffer.byteLength >= 84) {
+    const n = view.getUint32(80, true);
+    if (n > 0 && Math.abs(buffer.byteLength - (84 + n * 50)) <= 2) {
+      return parseBinarySTL(view, n);
+    }
+  }
+  // Fallback ASCII
+  return parseAsciiSTL(new TextDecoder('utf-8', { fatal: false }).decode(buffer));
+}
+
+function parseBinarySTL(view, n) {
+  const tris = new Array(n);
+  let off = 84;
+  for (let i = 0; i < n; i++) {
+    off += 12; // ignore normal
+    const ax=view.getFloat32(off,true), ay=view.getFloat32(off+4,true), az=view.getFloat32(off+8,true); off+=12;
+    const bx=view.getFloat32(off,true), by=view.getFloat32(off+4,true), bz=view.getFloat32(off+8,true); off+=12;
+    const cx=view.getFloat32(off,true), cy=view.getFloat32(off+4,true), cz=view.getFloat32(off+8,true); off+=12;
+    off += 2; // attribut
+    tris[i] = { v0:{x:ax,y:ay,z:az}, v1:{x:bx,y:by,z:bz}, v2:{x:cx,y:cy,z:cz} };
+  }
+  return tris;
+}
+
+function parseAsciiSTL(text) {
+  const tris = [];
+  const re = /vertex\s+([\-\d.eE+]+)\s+([\-\d.eE+]+)\s+([\-\d.eE+]+)/gi;
+  let m, buf = [];
+  while ((m = re.exec(text)) !== null) {
+    buf.push({ x: +m[1], y: +m[2], z: +m[3] });
+    if (buf.length === 3) {
+      tris.push({ v0: buf[0], v1: buf[1], v2: buf[2] });
+      buf = [];
+    }
+  }
+  return tris;
+}
+
+function bboxOf(tris) {
+  let xMin=Infinity,xMax=-Infinity,yMin=Infinity,yMax=-Infinity,zMin=Infinity,zMax=-Infinity;
+  for (const { v0,v1,v2 } of tris) {
+    for (const v of [v0,v1,v2]) {
+      if (v.x < xMin) xMin=v.x; if (v.x > xMax) xMax=v.x;
+      if (v.y < yMin) yMin=v.y; if (v.y > yMax) yMax=v.y;
+      if (v.z < zMin) zMin=v.z; if (v.z > zMax) zMax=v.z;
+    }
+  }
+  return { xMin,xMax,yMin,yMax,zMin,zMax };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 2 — GRILLE SPATIALE (accélération du lancé de rayons)
+// ═══════════════════════════════════════════════════════════════
+
+class SpatialGrid {
+  constructor(tris, bb, N = 30) {
+    this.N = N;
+    this.bb = bb;
+    this.cw = (bb.xMax - bb.xMin) / N;
+    this.ch = (bb.yMax - bb.yMin) / N;
+    this.cells = Array.from({ length: N * N }, () => []);
+
+    for (let i = 0; i < tris.length; i++) {
+      const { v0,v1,v2 } = tris[i];
+      const txm = Math.min(v0.x, v1.x, v2.x), txM = Math.max(v0.x, v1.x, v2.x);
+      const tym = Math.min(v0.y, v1.y, v2.y), tyM = Math.max(v0.y, v1.y, v2.y);
+      const cx0 = Math.max(0, Math.floor((txm - bb.xMin) / this.cw));
+      const cx1 = Math.min(N-1, Math.floor((txM - bb.xMin) / this.cw));
+      const cy0 = Math.max(0, Math.floor((tym - bb.yMin) / this.ch));
+      const cy1 = Math.min(N-1, Math.floor((tyM - bb.yMin) / this.ch));
+      for (let cy = cy0; cy <= cy1; cy++)
+        for (let cx = cx0; cx <= cx1; cx++)
+          this.cells[cy * N + cx].push(i);
+    }
+  }
+
+  query(x, y) {
+    const cx = Math.max(0, Math.min(this.N-1, Math.floor((x - this.bb.xMin) / this.cw)));
+    const cy = Math.max(0, Math.min(this.N-1, Math.floor((y - this.bb.yMin) / this.ch)));
+    return this.cells[cy * this.N + cx];
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 3 — INTERSECTION RAYON VERTICAL / TRIANGLE → Z
+// ═══════════════════════════════════════════════════════════════
+
+function hitZ(x, y, v0, v1, v2) {
+  const x0=v0.x, y0=v0.y, x1=v1.x, y1=v1.y, x2=v2.x, y2=v2.y;
+  const d = (y1-y2)*(x0-x2) + (x2-x1)*(y0-y2);
+  if (Math.abs(d) < 1e-12) return null; // triangle dégénéré ou horizontal
+  const w0 = ((y1-y2)*(x-x2) + (x2-x1)*(y-y2)) / d;
+  if (w0 < -1e-8) return null;
+  const w1 = ((y2-y0)*(x-x2) + (x0-x2)*(y-y2)) / d;
+  if (w1 < -1e-8) return null;
+  const w2 = 1 - w0 - w1;
+  if (w2 < -1e-8) return null;
+  return w0*v0.z + w1*v1.z + w2*v2.z;
+}
+
+function surfaceZ(x, y, tris, grid) {
+  let best = -Infinity, found = false;
+  for (const i of grid.query(x, y)) {
+    const { v0,v1,v2 } = tris[i];
+    const z = hitZ(x, y, v0, v1, v2);
+    if (z !== null && z > best) { best = z; found = true; }
+  }
+  return found ? best : null;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 4 — GÉNÉRATEUR DE PARCOURS OUTIL (raster zigzag)
+// ═══════════════════════════════════════════════════════════════
+// Chaque point de découpe = déplacement simultané X + Y + Z (G1)
+// ═══════════════════════════════════════════════════════════════
+
+async function buildToolpath(tris, bb, grid, params, onProgress) {
+  const { stepMm, scanDir, originMode, originCustom } = params;
+  const waypoints = []; // { x, y, z, type: 'plunge'|'cut'|'lift' }
+
+  // Calcul de l'origine pièce (décalage WCS)
+  let ox = 0, oy = 0, oz = 0;
+  if (originMode === 'stock') {
+    const cx = (bb.xMin + bb.xMax) / 2;
+    const cy = (bb.yMin + bb.yMax) / 2;
+    ox = cx - params.stockDims.x / 2;
+    oy = cy - params.stockDims.y / 2;
+    oz = bb.zMax;
+  } else if (originMode === 'top-center') {
+    ox = (bb.xMin + bb.xMax) / 2;
+    oy = (bb.yMin + bb.yMax) / 2;
+    oz = bb.zMax;
+  } else if (originMode === 'corner-top') {
+    ox = bb.xMin;
+    oy = bb.yMin;
+    oz = bb.zMax;
+  } else if (originMode === 'custom') {
+    ox = originCustom.x;
+    oy = originCustom.y;
+    oz = originCustom.z;
+  }
+
+  let totalPathLen = 0;
+  let prevWp = null;
+
+  const dirs = scanDir === 'xy' ? ['x','y'] : [scanDir];
+
+  for (const dir of dirs) {
+    const isX = dir === 'x';
+    // Axe primaire (direction de balayage) et secondaire (pas latéral)
+    const [A0, A1] = isX ? [bb.xMin, bb.xMax] : [bb.yMin, bb.yMax];
+    const [B0, B1] = isX ? [bb.yMin, bb.yMax] : [bb.xMin, bb.xMax];
+
+    const nB = Math.max(1, Math.round((B1 - B0) / stepMm));
+    const nA = Math.max(1, Math.round((A1 - A0) / stepMm));
+
+    for (let bi = 0; bi <= nB; bi++) {
+      const B = B0 + bi * (B1 - B0) / nB;
+      const rev = (bi % 2 === 1); // zigzag
+      let firstInRow = true;
+
+      for (let ai = 0; ai <= nA; ai++) {
+        const aIdx = rev ? (nA - ai) : ai;
+        const A = A0 + aIdx * (A1 - A0) / nA;
+        const x = isX ? A : B;
+        const y = isX ? B : A;
+        const z = surfaceZ(x, y, tris, grid);
+
+        if (z !== null) {
+          const wp = {
+            x: x - ox,
+            y: y - oy,
+            z: z - oz,
+            type: firstInRow ? 'plunge' : 'cut'
+          };
+          if (prevWp && wp.type === 'cut') {
+            const dx = wp.x - prevWp.x, dy = wp.y - prevWp.y, dz = wp.z - prevWp.z;
+            totalPathLen += Math.sqrt(dx*dx + dy*dy + dz*dz);
+          }
+          waypoints.push(wp);
+          prevWp = wp;
+          firstInRow = false;
+        } else {
+          // Trou dans la surface → lever l'outil
+          if (!firstInRow) {
+            waypoints.push({ x: 0, y: 0, z: 0, type: 'lift' });
+            firstInRow = true;
+            prevWp = null;
+          }
+        }
+      }
+
+      // Yield au navigateur toutes les 6 lignes
+      if (bi % 6 === 0) {
+        onProgress(bi / nB);
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+  }
+
+  return { waypoints, totalPathLen };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 5 — ÉCRITURE G-CODE
+// ═══════════════════════════════════════════════════════════════
+
+function writeGCode(waypoints, params) {
+  const { feedRate, plungeRate, spindleRPM, safetyZ, controller, toolDiam, toolType } = params;
+  const f = n => n.toFixed(3);
+  const lines = [];
+  const isGrbl = controller === 'grbl';
+  const isMach = controller === 'mach3';
+
+  // ── En-tête ──
+  if (isGrbl) lines.push('%');
+  lines.push('; =====================================================');
+  lines.push('; G-Code 3D — Usinage simultané XYZ');
+  lines.push(`; Généré le : ${new Date().toLocaleString('fr-FR')}`);
+  lines.push(`; Outil     : ${toolType === 'ball' ? 'Bout sphérique' : 'Bout plat'} Ø${toolDiam} mm`);
+  lines.push(`; Avance    : ${feedRate} mm/min | Plongée : ${plungeRate} mm/min`);
+  lines.push(`; Broche    : ${spindleRPM} tr/min | Sécurité Z : ${safetyZ} mm`);
+  lines.push(`; Points    : ${waypoints.length}`);
+  lines.push('; =====================================================');
+  lines.push('');
+  lines.push('G21       ; millimètres');
+  lines.push('G90       ; coordonnées absolues');
+  lines.push('G94       ; avance en mm/min');
+  if (isMach) lines.push('G64 P0.025 Q0.025 ; lissage de trajectoire');
+  lines.push('');
+  lines.push('; --- Mise en place ---');
+  lines.push('T1 M6                     ; appel de l\'outil 1');
+  lines.push(`S${spindleRPM} M3         ; broche en marche (sens horaire)`);
+  lines.push('G4 P2.0                   ; attente 2 s (mise en vitesse broche)');
+  lines.push(`G0 Z${f(safetyZ)}         ; montée à hauteur de sécurité`);
+  lines.push('G0 X0.000 Y0.000          ; origine XY');
+  lines.push('');
+  lines.push('; --- Parcours outil (déplacements G1 simultanés XYZ) ---');
+
+  // ── Corps : parcours ──
+  let inCut = false;
+  let lastFeed = null;
+
+  for (let i = 0; i < waypoints.length; i++) {
+    const { x, y, z, type } = waypoints[i];
+
+    if (type === 'lift') {
+      if (inCut) {
+        lines.push(`G0 Z${f(safetyZ)}`);
+        inCut = false;
+        lastFeed = null;
+      }
+      continue;
+    }
+
+    if (type === 'plunge') {
+      if (inCut) { lines.push(`G0 Z${f(safetyZ)}`); lastFeed = null; }
+      lines.push(`G0 X${f(x)} Y${f(y)}`);
+      const fStr = (lastFeed !== plungeRate) ? ` F${plungeRate}` : '';
+      lines.push(`G1 Z${f(z)}${fStr}`);
+      lastFeed = plungeRate;
+      inCut = true;
+      continue;
+    }
+
+    // type === 'cut' : déplacement simultané X, Y, Z
+    if (!inCut) {
+      lines.push(`G0 X${f(x)} Y${f(y)}`);
+      const fStr = (lastFeed !== plungeRate) ? ` F${plungeRate}` : '';
+      lines.push(`G1 Z${f(z)}${fStr}`);
+      lastFeed = plungeRate;
+      inCut = true;
+    } else {
+      const fStr = (lastFeed !== feedRate) ? ` F${feedRate}` : '';
+      lines.push(`G1 X${f(x)} Y${f(y)} Z${f(z)}${fStr}`);
+      lastFeed = feedRate;
+    }
+  }
+
+  // ── Fin de programme ──
+  lines.push('');
+  lines.push('; --- Fin ---');
+  lines.push(`G0 Z${f(safetyZ)}`);
+  lines.push('G0 X0.000 Y0.000');
+  lines.push('M5   ; arrêt broche');
+  lines.push('M30  ; fin de programme');
+  if (isGrbl) lines.push('%');
+
+  return lines.join('\n');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 6 — VISUALISEUR THREE.JS
+// ═══════════════════════════════════════════════════════════════
+
+class Viewer3D {
+  constructor() {
+    const canvas = document.getElementById('canvas3d');
+    this.canvas = canvas;
+
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setClearColor(0x060e18);
+
+    this.scene = new THREE.Scene();
+
+    // Rotation racine : repère CNC (Z en haut) → Three.js (Y en haut)
+    this.root = new THREE.Object3D();
+    this.root.rotation.x = -Math.PI / 2;
+    this.scene.add(this.root);
+
+    this.camera = new THREE.PerspectiveCamera(50, 1, 0.001, 1e6);
+
+    // Lumières
+    this.scene.add(new THREE.AmbientLight(0x8ab4cc, 0.5));
+    const d1 = new THREE.DirectionalLight(0xffffff, 0.7);
+    d1.position.set(1, 3, 2);
+    this.scene.add(d1);
+    const d2 = new THREE.DirectionalLight(0x6688ff, 0.3);
+    d2.position.set(-2, 1, -1);
+    this.scene.add(d2);
+
+    // Grille de référence (plan XY CNC = plan XZ Three.js après rotation)
+    this.gridHelper = new THREE.GridHelper(200, 20, 0x1a3050, 0x112030);
+    this.scene.add(this.gridHelper);
+
+    // Groupe axes XYZ (ajouté à root → espace CNC)
+    this.axesGroup = new THREE.Group();
+    this.root.add(this.axesGroup);
+    this._buildAxes(30);
+
+    // État caméra
+    this.center = new THREE.Vector3(0, 0, 0);
+    this.radius = 200;
+    this.theta = 0.65;
+    this.phi = 1.05;
+
+    this.modelMesh = null;
+    this.modelWire = null;
+    this.pathLine  = null;
+    this.stockMesh = null;
+    this.stockEdges = null;
+
+    this._setupMouse();
+    this._resize();
+    window.addEventListener('resize', () => this._resize());
+    this._tick();
+  }
+
+  _resize() {
+    const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
+    this.renderer.setSize(w, h, false);
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+  }
+
+  _setupMouse() {
+    const el = this.canvas;
+    let orb = false, pan = false;
+    let lx = 0, ly = 0;
+
+    el.addEventListener('mousedown', e => {
+      if (e.button === 0 && !e.ctrlKey) orb = true;
+      if (e.button === 2 || (e.button === 0 && e.ctrlKey)) pan = true;
+      lx = e.clientX; ly = e.clientY;
+      e.preventDefault();
+    });
+    el.addEventListener('contextmenu', e => e.preventDefault());
+    window.addEventListener('mouseup', () => { orb = false; pan = false; });
+    window.addEventListener('mousemove', e => {
+      const dx = e.clientX - lx, dy = e.clientY - ly;
+      lx = e.clientX; ly = e.clientY;
+      if (orb) {
+        this.theta -= dx * 0.007;
+        this.phi = Math.max(0.05, Math.min(Math.PI - 0.05, this.phi + dy * 0.007));
+        this._updateCamera();
+      }
+      if (pan) {
+        const s = this.radius * 0.0018;
+        // Axe droit (horizontal dans le plan de vue)
+        const dir = this.camera.position.clone().sub(this.center).normalize();
+        const right = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0,1,0)).normalize();
+        const up = new THREE.Vector3(0, 1, 0);
+        this.center.addScaledVector(right, -dx * s);
+        this.center.addScaledVector(up, dy * s);
+        this._updateCamera();
+      }
+    });
+    el.addEventListener('wheel', e => {
+      this.radius *= 1 + e.deltaY * 0.001;
+      this.radius = Math.max(0.1, Math.min(1e5, this.radius));
+      this._updateCamera();
+      e.preventDefault();
+    }, { passive: false });
+
+    // Touch : orbite (1 doigt) + pinch zoom (2 doigts)
+    let lastDist = 0;
+    el.addEventListener('touchstart', e => {
+      if (e.touches.length === 1) { orb = true; lx = e.touches[0].clientX; ly = e.touches[0].clientY; }
+      else if (e.touches.length === 2) {
+        orb = false;
+        lastDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+      }
+      e.preventDefault();
+    }, { passive: false });
+    el.addEventListener('touchmove', e => {
+      if (e.touches.length === 1 && orb) {
+        const dx = e.touches[0].clientX - lx, dy = e.touches[0].clientY - ly;
+        lx = e.touches[0].clientX; ly = e.touches[0].clientY;
+        this.theta -= dx * 0.007;
+        this.phi = Math.max(0.05, Math.min(Math.PI - 0.05, this.phi + dy * 0.007));
+        this._updateCamera();
+      } else if (e.touches.length === 2) {
+        const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        this.radius *= lastDist / d;
+        this.radius = Math.max(0.1, Math.min(1e5, this.radius));
+        lastDist = d;
+        this._updateCamera();
+      }
+      e.preventDefault();
+    }, { passive: false });
+    el.addEventListener('touchend', () => { orb = false; });
+  }
+
+  _updateCamera() {
+    const { theta, phi, radius, center } = this;
+    this.camera.position.set(
+      center.x + radius * Math.sin(phi) * Math.sin(theta),
+      center.y + radius * Math.cos(phi),
+      center.z + radius * Math.sin(phi) * Math.cos(theta)
+    );
+    this.camera.lookAt(center);
+  }
+
+  // ── Axes XYZ avec labels ──────────────────────────────────────
+  _buildAxes(size) {
+    // Vider le groupe
+    const g = this.axesGroup;
+    while (g.children.length) g.remove(g.children[0]);
+    this._axisSize = size;
+
+    const defs = [
+      { dir: new THREE.Vector3(1, 0, 0), color: 0xff3333, label: 'X' },
+      { dir: new THREE.Vector3(0, 1, 0), color: 0x33cc55, label: 'Y' },
+      { dir: new THREE.Vector3(0, 0, 1), color: 0x3399ff, label: 'Z' }
+    ];
+
+    for (const { dir, color, label } of defs) {
+      // Flèche
+      const arrow = new THREE.ArrowHelper(
+        dir, new THREE.Vector3(), size, color,
+        size * 0.18, size * 0.09
+      );
+      // Visible par-dessus la géométrie
+      [arrow.line, arrow.cone].forEach(m => {
+        m.material.depthTest = false;
+        m.renderOrder = 100;
+      });
+      g.add(arrow);
+
+      // Label sprite (billboard canvas)
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      const hex = '#' + color.toString(16).padStart(6, '0');
+      // Fond semi-transparent
+      ctx.fillStyle = 'rgba(6,14,24,0.6)';
+      ctx.beginPath();
+      ctx.arc(64, 64, 58, 0, Math.PI * 2);
+      ctx.fill();
+      // Lettre
+      ctx.fillStyle = hex;
+      ctx.font = 'bold 82px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, 64, 68);
+      const tex = new THREE.CanvasTexture(canvas);
+      const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+      const sprite = new THREE.Sprite(mat);
+      sprite.scale.setScalar(size * 0.32);
+      sprite.position.copy(dir.clone().multiplyScalar(size * 1.22));
+      sprite.renderOrder = 101;
+      g.add(sprite);
+    }
+  }
+
+  // Repositionne et redimensionne les axes (coords CNC brutes)
+  setAxesOrigin(x, y, z, size) {
+    this.axesGroup.position.set(x, y, z);
+    if (size && Math.abs(size - this._axisSize) > 0.5) this._buildAxes(size);
+  }
+
+  toggleAxes(v) { this.axesGroup.visible = v; }
+
+  _tick() {
+    requestAnimationFrame(() => this._tick());
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  // Charge et affiche le modèle STL
+  setModel(tris, bb) {
+    if (this.modelMesh) { this.root.remove(this.modelMesh); this.modelMesh.geometry.dispose(); }
+    if (this.modelWire) { this.root.remove(this.modelWire); this.modelWire = null; }
+
+    const positions = new Float32Array(tris.length * 9);
+    let idx = 0;
+    for (const { v0, v1, v2 } of tris) {
+      positions[idx++]=v0.x; positions[idx++]=v0.y; positions[idx++]=v0.z;
+      positions[idx++]=v1.x; positions[idx++]=v1.y; positions[idx++]=v1.z;
+      positions[idx++]=v2.x; positions[idx++]=v2.y; positions[idx++]=v2.z;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.computeVertexNormals();
+
+    // Mesh solide semi-transparent
+    const mat = new THREE.MeshPhongMaterial({
+      color: 0x3070a0,
+      emissive: 0x0a1828,
+      specular: 0x88ccff,
+      shininess: 60,
+      transparent: true,
+      opacity: 0.72,
+      side: THREE.DoubleSide
+    });
+    this.modelMesh = new THREE.Mesh(geo, mat);
+    this.root.add(this.modelMesh);
+
+    // Fil de fer par-dessus (stocké pour pouvoir le masquer)
+    const wmat = new THREE.MeshBasicMaterial({ color: 0x2060a0, wireframe: true, transparent: true, opacity: 0.12 });
+    this.modelWire = new THREE.Mesh(geo, wmat);
+    this.root.add(this.modelWire);
+
+    this.fitView(bb);
+    this.toggleModel(true);
+  }
+
+  // Affiche le parcours outil sous forme de ligne colorée
+  // origin : offset WCS en coords modèle (pour re-projeter le parcours G-code → coords modèle)
+  setToolpath(waypoints, bb, origin) {
+    if (this.pathLine) { this.root.remove(this.pathLine); this.pathLine.geometry.dispose(); }
+
+    const cuts = waypoints.filter(w => w.type === 'cut' || w.type === 'plunge');
+    if (cuts.length < 2) return;
+
+    const ox = origin ? origin.x : 0;
+    const oy = origin ? origin.y : 0;
+    const oz = origin ? origin.z : 0;
+
+    const positions = new Float32Array(cuts.length * 3);
+    const colors = new Float32Array(cuts.length * 3);
+    for (let i = 0; i < cuts.length; i++) {
+      const { x, y, z } = cuts[i];
+      // Les waypoints sont en coords G-code ; on rajoute l'offset pour revenir en coords modèle
+      positions[i*3] = x + ox; positions[i*3+1] = y + oy; positions[i*3+2] = z + oz;
+      // Dégradé vert → jaune → rouge selon l'avancement
+      const t = i / (cuts.length - 1);
+      const c = new THREE.Color().setHSL(0.33 * (1 - t), 1, 0.55);
+      colors[i*3] = c.r; colors[i*3+1] = c.g; colors[i*3+2] = c.b;
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const mat = new THREE.LineBasicMaterial({ vertexColors: true, linewidth: 1 });
+    this.pathLine = new THREE.Line(geo, mat);
+    this.root.add(this.pathLine);
+    this.togglePath(true);
+  }
+
+  fitView(bb) {
+    const cx = (bb.xMin + bb.xMax) / 2;
+    const cy = (bb.yMin + bb.yMax) / 2;
+    const cz = (bb.zMin + bb.zMax) / 2;
+    const size = Math.max(bb.xMax-bb.xMin, bb.yMax-bb.yMin, bb.zMax-bb.zMin);
+
+    // En Three.js (après rotation X-90°), CNC-center → Three.js center
+    this.center.set(cx, cz, -cy);
+    this.radius = size * 1.8;
+
+    // Adapter la grille à la taille du modèle
+    this.scene.remove(this.gridHelper);
+    const gSize = Math.ceil(size * 2 / 10) * 10;
+    this.gridHelper = new THREE.GridHelper(gSize, 20, 0x1a3050, 0x112030);
+    this.gridHelper.position.set(cx, 0, -cy);
+    this.scene.add(this.gridHelper);
+
+    // Reconstruire les axes à la bonne taille (35% de la plus grande dimension)
+    const axSize = Math.max(size * 0.35, 5);
+    this._buildAxes(axSize);
+
+    this._updateCamera();
+  }
+
+  toggleModel(v) {
+    if (this.modelMesh) this.modelMesh.visible = v;
+    if (this.modelWire) this.modelWire.visible = v;
+  }
+  togglePath(v)  { if (this.pathLine)   this.pathLine.visible   = v; }
+  toggleStock(v) {
+    if (this.stockMesh)  this.stockMesh.visible  = v;
+    if (this.stockEdges) this.stockEdges.visible = v;
+  }
+
+  // ── Visualisation du brut ──────────────────────────────────────
+  // bb    : bounding box du modèle STL (coords CNC)
+  // sX/sY/sZ : dimensions du brut
+  // Le brut est centré XY sur le modèle, sommet = bb.zMax
+  setStock(bb, sX, sY, sZ) {
+    // Supprimer l'ancien brut
+    if (this.stockMesh)  { this.root.remove(this.stockMesh);  this.stockMesh.geometry.dispose();  this.stockMesh  = null; }
+    if (this.stockEdges) { this.root.remove(this.stockEdges); this.stockEdges.geometry.dispose(); this.stockEdges = null; }
+    if (!bb || !sX || !sY || !sZ) return { fits: true };
+
+    const cx = (bb.xMin + bb.xMax) / 2;
+    const cy = (bb.yMin + bb.yMax) / 2;
+    const cz = bb.zMax - sZ / 2; // centre Z : sommet brut = bb.zMax
+
+    const geo = new THREE.BoxGeometry(sX, sY, sZ);
+
+    // Faces semi-transparentes (couleur bois brut / aluminium)
+    const matFaces = new THREE.MeshBasicMaterial({
+      color: 0xb08030, transparent: true, opacity: 0.09,
+      side: THREE.DoubleSide, depthWrite: false
+    });
+    this.stockMesh = new THREE.Mesh(geo, matFaces);
+    this.stockMesh.position.set(cx, cy, cz);
+    this.root.add(this.stockMesh);
+
+    // Arêtes nettes
+    const edgesGeo = new THREE.EdgesGeometry(geo);
+    const matEdges = new THREE.LineBasicMaterial({ color: 0xd4a030, transparent: true, opacity: 0.7 });
+    this.stockEdges = new THREE.LineSegments(edgesGeo, matEdges);
+    this.stockEdges.position.set(cx, cy, cz);
+    this.root.add(this.stockEdges);
+
+    // Vérifier que la pièce tient dans le brut
+    const fits = sX >= (bb.xMax - bb.xMin) && sY >= (bb.yMax - bb.yMin) && sZ >= (bb.zMax - bb.zMin);
+    return { fits };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 7 — CONTRÔLEUR UI
+// ═══════════════════════════════════════════════════════════════
+
+let appState = { tris: null, bbox: null, grid: null, gcode: null };
+const viewer = new Viewer3D();
+
+// Utilitaires DOM
+const $ = id => document.getElementById(id);
+function setStatus(id, type, msg) {
+  const el = $(id);
+  el.className = `status ${type}`;
+  el.textContent = msg;
+}
+function progress(pct) {
+  $('progFill').style.width = (pct * 100).toFixed(0) + '%';
+}
+
+// Calcul automatique du pas en mm
+function updateStepMm() {
+  const diam = +$('toolDiam').value;
+  const pct  = +$('stepPct').value;
+  $('stepMm').value = (diam * pct / 100).toFixed(3);
+}
+$('toolDiam').addEventListener('input', updateStepMm);
+$('stepPct').addEventListener('input', updateStepMm);
+updateStepMm();
+
+// ── Chargement du fichier STL ──
+$('stlFile').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      setStatus('fileStatus', 'inf', `Analyse de ${file.name}…`);
+      const tris = parseSTL(ev.target.result);
+      if (!tris || tris.length === 0) throw new Error('Aucun triangle lu — fichier invalide ?');
+
+      const bbox = bboxOf(tris);
+      const grid = new SpatialGrid(tris, bbox);
+      appState = { tris, bbox, grid, gcode: null };
+
+      const dims = [
+        (bbox.xMax-bbox.xMin).toFixed(1),
+        (bbox.yMax-bbox.yMin).toFixed(1),
+        (bbox.zMax-bbox.zMin).toFixed(1)
+      ];
+      setStatus('fileStatus', 'ok',
+        `✓ ${tris.length.toLocaleString('fr-FR')} triangles — ${dims[0]} × ${dims[1]} × ${dims[2]} mm`);
+
+      viewer.setModel(tris, bbox);
+      prefillCustomOrigin(bbox);
+      prefillStock(bbox);
+      updateStock();
+      $('btnGen').disabled = false;
+    } catch(err) {
+      setStatus('fileStatus', 'err', '✗ ' + err.message);
+    }
+  };
+  reader.onerror = () => setStatus('fileStatus', 'err', '✗ Erreur lecture fichier');
+  reader.readAsArrayBuffer(file);
+});
+
+// ── Génération du parcours ──
+$('btnGen').addEventListener('click', async () => {
+  const { tris, bbox, grid } = appState;
+  if (!tris) return;
+
+  const stepMm = +$('stepMm').value;
+  if (stepMm <= 0) { setStatus('genStatus', 'err', '✗ Pas invalide'); return; }
+
+  const params = {
+    stepMm,
+    scanDir: $('scanDir').value,
+    originMode: $('origin').value,
+    originCustom: {
+      x: +$('originX').value,
+      y: +$('originY').value,
+      z: +$('originZ').value
+    },
+    stockDims: {
+      x: +$('stockX').value,
+      y: +$('stockY').value,
+      z: +$('stockZ').value
+    },
+    feedRate: +$('feedRate').value,
+    plungeRate: +$('plungeRate').value,
+    spindleRPM: +$('spindleRPM').value,
+    safetyZ: +$('safetyZ').value,
+    controller: $('controller').value,
+    toolDiam: +$('toolDiam').value,
+    toolType: $('toolType').value
+  };
+
+  $('btnGen').disabled = true;
+  $('btnDl').disabled = true;
+  progress(0);
+  setStatus('genStatus', 'inf', '⏳ Calcul du parcours en cours…');
+  $('genStats').innerHTML = '';
+
+  // Estimation de la résolution
+  const estX = Math.round((bbox.xMax-bbox.xMin) / stepMm);
+  const estY = Math.round((bbox.yMax-bbox.yMin) / stepMm);
+  const estPts = estX * estY * (params.scanDir === 'xy' ? 2 : 1);
+
+  try {
+    const t0 = performance.now();
+    const { waypoints, totalPathLen } = await buildToolpath(tris, bbox, grid, params, progress);
+    const t1 = performance.now();
+
+    const gcode = writeGCode(waypoints, params);
+    appState.gcode = gcode;
+
+    const gcodeLines = gcode.split('\n').length;
+    const cutPoints = waypoints.filter(w => w.type === 'cut').length;
+    const timeCutMin = (totalPathLen / params.feedRate).toFixed(1);
+    const timeCutSec = Math.round(totalPathLen / params.feedRate * 60);
+
+    setStatus('genStatus', 'ok', `✓ Parcours calculé en ${((t1-t0)/1000).toFixed(1)} s`);
+    $('genStats').innerHTML = [
+      `<b>${waypoints.length.toLocaleString('fr')}</b> points au total`,
+      `<b>${cutPoints.toLocaleString('fr')}</b> points de découpe (G1 XYZ simultanés)`,
+      `<b>${gcodeLines.toLocaleString('fr')}</b> lignes G-code`,
+      `Longueur parcours : <b>${(totalPathLen/1000).toFixed(2)} m</b>`,
+      `Temps estimé (avance seule) : <b>${timeCutMin} min</b>`,
+      `Grille : <b>${estX} × ${estY}</b> points/ligne`
+    ].join('<br>');
+
+    progress(1);
+    viewer.setToolpath(waypoints, bbox, getWCSOriginFromBbox(bbox));
+    updateAxesPos();
+    $('btnDl').disabled = false;
+    $('btnGen').disabled = false;
+
+  } catch(err) {
+    setStatus('genStatus', 'err', '✗ ' + err.message);
+    $('btnGen').disabled = false;
+    console.error(err);
+  }
+});
+
+// ── Téléchargement du G-code ──
+$('btnDl').addEventListener('click', () => {
+  if (!appState.gcode) return;
+  const blob = new Blob([appState.gcode], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const fileName = $('stlFile').files[0]
+    ? $('stlFile').files[0].name.replace(/\.stl$/i, '.gcode')
+    : 'parcours.gcode';
+  a.download = fileName;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+// ── Toggles d'affichage ──
+$('chkModel').addEventListener('change', e => viewer.toggleModel(e.target.checked));
+$('chkStock').addEventListener('change', e => viewer.toggleStock(e.target.checked));
+$('chkPath').addEventListener('change',  e => viewer.togglePath(e.target.checked));
+$('chkAxes').addEventListener('change',  e => viewer.toggleAxes(e.target.checked));
+
+// ── Modification des dimensions du brut ──
+['stockX', 'stockY', 'stockZ'].forEach(id =>
+  $(id).addEventListener('input', updateStock)
+);
+$('btnCenter').addEventListener('click', () => {
+  if (appState.bbox) viewer.fitView(appState.bbox);
+});
+
+// ── Origine personnalisée : afficher / masquer les champs XYZ ──
+function onOriginChange() {
+  const isCustom = $('origin').value === 'custom';
+  $('originCustomDiv').style.display = isCustom ? 'block' : 'none';
+  updateAxesPos();
+}
+$('origin').addEventListener('change', onOriginChange);
+['originX', 'originY', 'originZ'].forEach(id =>
+  $(id).addEventListener('input', updateAxesPos)
+);
+
+// ── Calcul et positionnement des axes sur l'origine WCS ──
+function getWCSOriginFromBbox(bb) {
+  const mode = $('origin').value;
+  if (mode === 'stock') {
+    const cx = (bb.xMin + bb.xMax) / 2, cy = (bb.yMin + bb.yMax) / 2;
+    return { x: cx - +$('stockX').value / 2, y: cy - +$('stockY').value / 2, z: bb.zMax };
+  }
+  if (mode === 'top-center')  return { x: (bb.xMin+bb.xMax)/2, y: (bb.yMin+bb.yMax)/2, z: bb.zMax };
+  if (mode === 'corner-top')  return { x: bb.xMin, y: bb.yMin, z: bb.zMax };
+  if (mode === 'custom')      return { x: +$('originX').value, y: +$('originY').value, z: +$('originZ').value };
+  return { x: 0, y: 0, z: 0 }; // model
+}
+
+function updateAxesPos() {
+  if (!appState.bbox) return;
+  const bb = appState.bbox;
+  const size = Math.max(bb.xMax-bb.xMin, bb.yMax-bb.yMin, bb.zMax-bb.zMin) * 0.35;
+  const o = getWCSOriginFromBbox(bb);
+  viewer.setAxesOrigin(o.x, o.y, o.z, Math.max(size, 5));
+}
+
+// ── Pré-remplir les champs origine custom avec les coordonnées du modèle ──
+function prefillCustomOrigin(bb) {
+  $('originX').value = ((bb.xMin + bb.xMax) / 2).toFixed(3);
+  $('originY').value = ((bb.yMin + bb.yMax) / 2).toFixed(3);
+  $('originZ').value = bb.zMax.toFixed(3);
+  $('bboxHint').textContent =
+    `Plage STL → X [${bb.xMin.toFixed(1)}, ${bb.xMax.toFixed(1)}]  `+
+    `Y [${bb.yMin.toFixed(1)}, ${bb.yMax.toFixed(1)}]  `+
+    `Z [${bb.zMin.toFixed(1)}, ${bb.zMax.toFixed(1)}]`;
+}
+
+// ── Pré-remplir les dimensions du brut depuis les dimensions du modèle ──
+function prefillStock(bb) {
+  $('stockX').value = (bb.xMax - bb.xMin).toFixed(1);
+  $('stockY').value = (bb.yMax - bb.yMin).toFixed(1);
+  $('stockZ').value = (bb.zMax - bb.zMin).toFixed(1);
+}
+
+// ── Mettre à jour la visualisation 3D du brut ──
+function updateStock() {
+  if (!appState.bbox) return;
+  const bb = appState.bbox;
+  const sX = +$('stockX').value, sY = +$('stockY').value, sZ = +$('stockZ').value;
+  if (sX > 0 && sY > 0 && sZ > 0) {
+    const result = viewer.setStock(bb, sX, sY, sZ);
+    const mW = (bb.xMax - bb.xMin).toFixed(1);
+    const mD = (bb.yMax - bb.yMin).toFixed(1);
+    const mH = (bb.zMax - bb.zMin).toFixed(1);
+    if (!result.fits) {
+      setStatus('stockStatus', 'err',
+        `⚠ Brut (${sX}×${sY}×${sZ}) plus petit que la pièce (${mW}×${mD}×${mH} mm)`);
+    } else {
+      setStatus('stockStatus', 'ok',
+        `✓ Brut ${sX}×${sY}×${sZ} mm — pièce ${mW}×${mD}×${mH} mm`);
+    }
+    viewer.toggleStock($('chkStock').checked);
+  }
+  updateAxesPos();
+}
+
+</script>
+</body>
+</html>

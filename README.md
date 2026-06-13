@@ -1,0 +1,88 @@
+# GCode 3D Generator
+
+> Application web **single-file** (HTML + CSS + JS) pour générer et visualiser du G-code d'usinage CNC 3 axes simultanés (X, Y, Z) à partir d'un fichier STL.  
+> **Aucun serveur requis** — tout tourne dans le navigateur, hors-ligne possible.
+
+---
+
+> Web-based **single-file** app (HTML + CSS + JS) to generate and visualise CNC G-code with simultaneous 3-axis motion (X, Y, Z) from an STL file.  
+> **No server required** — runs entirely in the browser, works offline.
+
+---
+
+## Démo / Demo
+
+Télécharge `gcode3d-generator.html`, ouvre-le dans ton navigateur — c'est tout.  
+Download `gcode3d-generator.html`, open it in your browser — that's it.
+
+---
+
+## Fonctionnalités / Features
+
+| Fonctionnalité | Feature |
+|---|---|
+| Import STL binaire et ASCII | Binary and ASCII STL import |
+| Stratégies raster X, Y, croisé | Raster X, Y, crossed toolpaths |
+| Parcours 3 axes simultanés (G1 XYZ) | Simultaneous 3-axis motion (G1 XYZ) |
+| 5 modes d'origine pièce | 5 workpiece origin modes |
+| Visualisation brut (boîte translucide) | Stock block visualisation (translucent box) |
+| Compatibilité GRBL, Mach3/4, LinuxCNC | GRBL, Mach3/4, LinuxCNC compatibility |
+| Visualisation 3D Three.js (parcours + modèle) | Three.js 3D viewer (toolpath + model) |
+| Calcul asynchrone avec barre de progression | Async computation with progress bar |
+| Export `.gcode` avec en-tête commenté | `.gcode` export with commented header |
+| Interface responsive, thème sombre | Responsive UI, dark theme |
+
+---
+
+## Utilisation / Usage
+
+**FR :**  
+1. Télécharge `gcode3d-generator.html`  
+2. Ouvre-le dans Chrome, Firefox ou Edge  
+3. Charge un fichier STL  
+4. Configure les paramètres (outil, avances, broche, pas latéral)  
+5. Clique **Générer** → visualise → télécharge le `.gcode`
+
+**EN :**  
+1. Download `gcode3d-generator.html`  
+2. Open it in Chrome, Firefox or Edge  
+3. Load an STL file  
+4. Set parameters (tool, feed rates, spindle, step-over)  
+5. Click **Generate** → preview → download the `.gcode`
+
+---
+
+## Contrôleurs compatibles / Compatible controllers
+
+- **GRBL** (balises `%`, commentaires `;`)
+- **Mach3 / Mach4** (G64 path blending)
+- **LinuxCNC** (G21/G90/G94 standard)
+
+---
+
+## Road map
+
+Voir [`FONCTIONNALITES.md`](./FONCTIONNALITES.md) pour la liste complète des fonctionnalités prévues (V1.4 → V2.0).  
+See [`FONCTIONNALITES.md`](./FONCTIONNALITES.md) for the full feature roadmap (V1.4 → V2.0).
+
+Prochaines étapes prioritaires / Next priority milestones :
+- **V1.4** — Multi-passes (profondeur de passe, Z-level / depth per pass, Z-level)
+- **V1.5** — Import SVG / DXF (usinage 2D+ / 2.5D machining)
+- **V1.6** — Profils machines (machine profiles, localStorage)
+
+---
+
+## Licence / License
+
+[MIT](./LICENSE) — libre d'utilisation, de modification et de distribution avec mention de l'auteur.  
+Free to use, modify and distribute with attribution.
+
+---
+
+## Auteur / Author
+
+**Marc FONTAINE** — [FabLab BEN](https://www.ben-bordeaux.fr) / [Coop Alpha](https://www.coopalpha.coop)  
+Bègles (Gironde, France)
+
+Contributions bienvenues — issues et pull requests ouverts.  
+Contributions welcome — issues and pull requests open.

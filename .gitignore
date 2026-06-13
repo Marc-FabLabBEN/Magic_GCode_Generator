@@ -1,0 +1,13 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Éditeurs
+.vscode/
+*.swp
+*~
+
+# Fichiers de test locaux
+*.stl
+*.gcode
+test/
