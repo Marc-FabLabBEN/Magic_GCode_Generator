@@ -233,35 +233,52 @@ input[type=file]{display:none;}
 
 // ═══════════════════════════════════════════════════════════════
 // 1 — PARSING STL (binaire + ASCII)
+// ---------------------------------------------------------------
+// Un fichier STL décrit une surface 3D comme un maillage de
+// triangles. Chaque triangle = 3 sommets (x,y,z) + une normale.
+// Deux formats existent :
+//   • Binaire : 80 octets d'en-tête + uint32 (nb triangles) +
+//               N × 50 octets (12 float32 normal+3 sommets + 2 octets attr)
+//   • ASCII   : texte lisible, balises "vertex x y z"
 // ═══════════════════════════════════════════════════════════════
 
 function parseSTL(buffer) {
-  // Détection binaire : taille attendue = 84 + N*50 octets
+  // Heuristique de détection du format binaire :
+  // un STL binaire valide a exactement 84 + N*50 octets.
+  // On lit le nombre de triangles à l'offset 80 et on vérifie la taille.
   const view = new DataView(buffer);
   if (buffer.byteLength >= 84) {
-    const n = view.getUint32(80, true);
+    const n = view.getUint32(80, true); // nb triangles (little-endian)
     if (n > 0 && Math.abs(buffer.byteLength - (84 + n * 50)) <= 2) {
       return parseBinarySTL(view, n);
     }
   }
-  // Fallback ASCII
+  // Si la taille ne colle pas, on tente le parsing ASCII
   return parseAsciiSTL(new TextDecoder('utf-8', { fatal: false }).decode(buffer));
 }
 
+// Lecture d'un STL binaire octet par octet via DataView.
+// Chaque triangle occupe 50 octets :
+//   12 octets : normale (ignorée — recalculée par Three.js)
+//   36 octets : 3 sommets × 3 float32 (x, y, z)
+//    2 octets : attribut (ignoré)
 function parseBinarySTL(view, n) {
   const tris = new Array(n);
-  let off = 84;
+  let off = 84; // on saute les 80 octets d'en-tête + 4 octets uint32
   for (let i = 0; i < n; i++) {
-    off += 12; // ignore normal
+    off += 12; // ignorer la normale
     const ax=view.getFloat32(off,true), ay=view.getFloat32(off+4,true), az=view.getFloat32(off+8,true); off+=12;
     const bx=view.getFloat32(off,true), by=view.getFloat32(off+4,true), bz=view.getFloat32(off+8,true); off+=12;
     const cx=view.getFloat32(off,true), cy=view.getFloat32(off+4,true), cz=view.getFloat32(off+8,true); off+=12;
-    off += 2; // attribut
+    off += 2; // ignorer l'attribut
     tris[i] = { v0:{x:ax,y:ay,z:az}, v1:{x:bx,y:by,z:bz}, v2:{x:cx,y:cy,z:cz} };
   }
   return tris;
 }
 
+// Extraction des triangles depuis un STL ASCII.
+// La regex capture tous les triplets "vertex x y z" dans l'ordre.
+// On les regroupe par 3 pour former chaque triangle.
 function parseAsciiSTL(text) {
   const tris = [];
   const re = /vertex\s+([\-\d.eE+]+)\s+([\-\d.eE+]+)\s+([\-\d.eE+]+)/gi;
@@ -276,6 +293,9 @@ function parseAsciiSTL(text) {
   return tris;
 }
 
+// Calcule la boîte englobante (bounding box) du maillage.
+// Résultat : {xMin, xMax, yMin, yMax, zMin, zMax} en coordonnées STL (mm).
+// Utilisée pour centrer la vue, dimensionner le brut, placer l'origine.
 function bboxOf(tris) {
   let xMin=Infinity,xMax=-Infinity,yMin=Infinity,yMax=-Infinity,zMin=Infinity,zMax=-Infinity;
   for (const { v0,v1,v2 } of tris) {
@@ -290,18 +310,29 @@ function bboxOf(tris) {
 
 // ═══════════════════════════════════════════════════════════════
 // 2 — GRILLE SPATIALE (accélération du lancé de rayons)
+// ---------------------------------------------------------------
+// Problème : pour chaque point (x,y) de la grille d'usinage, on
+// doit trouver le triangle de la surface qui se trouve au-dessus
+// → tester tous les triangles serait O(N²) : trop lent.
+//
+// Solution : découper la surface XY en une grille de cellules
+// (N×N = 30×30 = 900 cellules). Chaque triangle est inscrit dans
+// toutes les cellules qu'il touche. Pour un point (x,y) donné,
+// on n'interroge que la cellule correspondante → O(1) moyen.
 // ═══════════════════════════════════════════════════════════════
 
 class SpatialGrid {
   constructor(tris, bb, N = 30) {
     this.N = N;
     this.bb = bb;
-    this.cw = (bb.xMax - bb.xMin) / N;
-    this.ch = (bb.yMax - bb.yMin) / N;
-    this.cells = Array.from({ length: N * N }, () => []);
+    this.cw = (bb.xMax - bb.xMin) / N; // largeur d'une cellule en X
+    this.ch = (bb.yMax - bb.yMin) / N; // hauteur d'une cellule en Y
+    this.cells = Array.from({ length: N * N }, () => []); // tableau 2D aplati
 
+    // Inscrire chaque triangle dans toutes les cellules qu'il recouvre
     for (let i = 0; i < tris.length; i++) {
       const { v0,v1,v2 } = tris[i];
+      // AABB du triangle en indices de cellule
       const txm = Math.min(v0.x, v1.x, v2.x), txM = Math.max(v0.x, v1.x, v2.x);
       const tym = Math.min(v0.y, v1.y, v2.y), tyM = Math.max(v0.y, v1.y, v2.y);
       const cx0 = Math.max(0, Math.floor((txm - bb.xMin) / this.cw));
@@ -310,10 +341,11 @@ class SpatialGrid {
       const cy1 = Math.min(N-1, Math.floor((tyM - bb.yMin) / this.ch));
       for (let cy = cy0; cy <= cy1; cy++)
         for (let cx = cx0; cx <= cx1; cx++)
-          this.cells[cy * N + cx].push(i);
+          this.cells[cy * N + cx].push(i); // indice du triangle
     }
   }
 
+  // Retourne les indices de triangles candidats pour le point (x, y)
   query(x, y) {
     const cx = Math.max(0, Math.min(this.N-1, Math.floor((x - this.bb.xMin) / this.cw)));
     const cy = Math.max(0, Math.min(this.N-1, Math.floor((y - this.bb.yMin) / this.ch)));
@@ -323,21 +355,37 @@ class SpatialGrid {
 
 // ═══════════════════════════════════════════════════════════════
 // 3 — INTERSECTION RAYON VERTICAL / TRIANGLE → Z
+// ---------------------------------------------------------------
+// Pour chaque point (x,y) de la grille, on lance un rayon
+// vertical (direction +Z) et on cherche le triangle de la surface
+// qu'il traverse en premier (le plus haut = zMax).
+//
+// Méthode : coordonnées barycentriques
+// Un point P est dans le triangle (v0,v1,v2) si ses poids
+// w0, w1, w2 sont tous ≥ 0 et w0+w1+w2 = 1.
+// Le Z en ce point vaut alors w0*z0 + w1*z1 + w2*z2.
 // ═══════════════════════════════════════════════════════════════
 
+// Calcule le Z de la surface du triangle (v0,v1,v2) au point (x,y).
+// Retourne null si (x,y) est hors du triangle (projection XY).
 function hitZ(x, y, v0, v1, v2) {
   const x0=v0.x, y0=v0.y, x1=v1.x, y1=v1.y, x2=v2.x, y2=v2.y;
+  // Dénominateur de la formule barycentrique (= 2 × aire signée du triangle)
   const d = (y1-y2)*(x0-x2) + (x2-x1)*(y0-y2);
-  if (Math.abs(d) < 1e-12) return null; // triangle dégénéré ou horizontal
+  if (Math.abs(d) < 1e-12) return null; // triangle dégénéré ou vu de face → ignorer
   const w0 = ((y1-y2)*(x-x2) + (x2-x1)*(y-y2)) / d;
-  if (w0 < -1e-8) return null;
+  if (w0 < -1e-8) return null; // hors triangle
   const w1 = ((y2-y0)*(x-x2) + (x0-x2)*(y-y2)) / d;
   if (w1 < -1e-8) return null;
   const w2 = 1 - w0 - w1;
   if (w2 < -1e-8) return null;
+  // Interpolation barycentrique du Z
   return w0*v0.z + w1*v1.z + w2*v2.z;
 }
 
+// Pour un point (x,y), retourne le Z le plus haut de la surface
+// (= le point que l'outil atteindra en premier par le dessus).
+// Retourne null si aucun triangle n'est trouvé sous ce point.
 function surfaceZ(x, y, tris, grid) {
   let best = -Infinity, found = false;
   for (const i of grid.query(x, y)) {
@@ -350,15 +398,26 @@ function surfaceZ(x, y, tris, grid) {
 
 // ═══════════════════════════════════════════════════════════════
 // 4 — GÉNÉRATEUR DE PARCOURS OUTIL (raster zigzag)
-// ═══════════════════════════════════════════════════════════════
-// Chaque point de découpe = déplacement simultané X + Y + Z (G1)
+// ---------------------------------------------------------------
+// Principe : on balaie la surface en lignes parallèles (raster).
+// À chaque point de la grille, on calcule le Z de la surface par
+// lancé de rayon → on génère un G1 X Y Z simultané.
+//
+// Zigzag : les lignes paires vont dans un sens, les impaires dans
+// l'autre → évite les retours à vide en bout de ligne.
+//
+// Types de waypoints :
+//   'plunge' : première plongée dans une ligne (descente G1 Z)
+//   'cut'    : déplacement de coupe simultané G1 XYZ
+//   'lift'   : levée d'outil (trou dans la surface → G0 Z sécurité)
 // ═══════════════════════════════════════════════════════════════
 
 async function buildToolpath(tris, bb, grid, params, onProgress) {
   const { stepMm, scanDir, originMode, originCustom } = params;
-  const waypoints = []; // { x, y, z, type: 'plunge'|'cut'|'lift' }
+  const waypoints = []; // liste de tous les points du parcours
 
-  // Calcul de l'origine pièce (décalage WCS)
+  // ── Calcul de l'offset WCS (origine pièce en coords STL) ──
+  // ox/oy/oz = coordonnées STL du point qui sera X0 Y0 Z0 en G-code
   let ox = 0, oy = 0, oz = 0;
   if (originMode === 'stock') {
     const cx = (bb.xMin + bb.xMax) / 2;
@@ -443,6 +502,14 @@ async function buildToolpath(tris, bb, grid, params, onProgress) {
 
 // ═══════════════════════════════════════════════════════════════
 // 5 — ÉCRITURE G-CODE
+// ---------------------------------------------------------------
+// Sérialise les waypoints en texte G-code.
+// Optimisations appliquées :
+//   • Feed modal : F n'est émis que lorsqu'il change (évite les
+//     répétitions sur chaque ligne → fichier plus court).
+//   • G0 rapide pour les déplacements hors matière.
+//   • G1 pour toutes les coupes (avance contrôlée).
+// Compatibilité : GRBL, Mach3/Mach4, LinuxCNC.
 // ═══════════════════════════════════════════════════════════════
 
 function writeGCode(waypoints, params) {
@@ -536,6 +603,22 @@ function writeGCode(waypoints, params) {
 
 // ═══════════════════════════════════════════════════════════════
 // 6 — VISUALISEUR THREE.JS
+// ---------------------------------------------------------------
+// Three.js utilise un repère Y-up (Y vers le haut).
+// Les CNC utilisent un repère Z-up (Z vers le haut).
+// Solution : un objet racine (this.root) est pivoté de -90° sur X
+// → tout ce qu'on ajoute à root utilise les coords CNC (Z-up).
+//
+// Hiérarchie de la scène :
+//   scene
+//   ├── gridHelper     (grille de référence, plan XY Three.js = table CNC)
+//   └── root  (rotation X -90°)
+//       ├── modelMesh  (surface STL solide)
+//       ├── modelWire  (filaire STL)
+//       ├── pathLine   (parcours outil)
+//       ├── stockMesh  (brut semi-transparent)
+//       ├── stockEdges (arêtes du brut)
+//       └── axesGroup  (flèches XYZ)
 // ═══════════════════════════════════════════════════════════════
 
 class Viewer3D {
@@ -543,13 +626,14 @@ class Viewer3D {
     const canvas = document.getElementById('canvas3d');
     this.canvas = canvas;
 
+    // Renderer WebGL avec anticrénelage
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setClearColor(0x060e18);
 
     this.scene = new THREE.Scene();
 
-    // Rotation racine : repère CNC (Z en haut) → Three.js (Y en haut)
+    // Objet racine pivoté : convertit le repère CNC (Z-up) en repère Three.js (Y-up)
     this.root = new THREE.Object3D();
     this.root.rotation.x = -Math.PI / 2;
     this.scene.add(this.root);
@@ -798,10 +882,9 @@ class Viewer3D {
       const { x, y, z } = cuts[i];
       // Les waypoints sont en coords G-code ; on rajoute l'offset pour revenir en coords modèle
       positions[i*3] = x + ox; positions[i*3+1] = y + oy; positions[i*3+2] = z + oz;
-      // Dégradé vert → jaune → rouge selon l'avancement
-      const t = i / (cuts.length - 1);
-      const c = new THREE.Color().setHSL(0.33 * (1 - t), 1, 0.55);
-      colors[i*3] = c.r; colors[i*3+1] = c.g; colors[i*3+2] = c.b;
+      // Cyan vif (#00E5FF) — couleur standard des parcours outil en CAM,
+      // contraste maximal avec le fond sombre, le modèle bleu et le brut doré
+      colors[i*3] = 0.0; colors[i*3+1] = 0.9; colors[i*3+2] = 1.0;
     }
 
     const geo = new THREE.BufferGeometry();
@@ -848,18 +931,20 @@ class Viewer3D {
   }
 
   // ── Visualisation du brut ──────────────────────────────────────
-  // bb    : bounding box du modèle STL (coords CNC)
+  // bb    : bounding box du modèle STL (coords CNC), ou null si aucun modèle
   // sX/sY/sZ : dimensions du brut
-  // Le brut est centré XY sur le modèle, sommet = bb.zMax
+  // Sans modèle : brut centré à l'origine, bas à Z=0
+  // Avec modèle : brut centré XY sur le modèle, sommet = bb.zMax
   setStock(bb, sX, sY, sZ) {
-    // Supprimer l'ancien brut
+    // Supprimer l'ancien brut s'il existe
     if (this.stockMesh)  { this.root.remove(this.stockMesh);  this.stockMesh.geometry.dispose();  this.stockMesh  = null; }
     if (this.stockEdges) { this.root.remove(this.stockEdges); this.stockEdges.geometry.dispose(); this.stockEdges = null; }
-    if (!bb || !sX || !sY || !sZ) return { fits: true };
+    if (!sX || !sY || !sZ) return { fits: true };
 
-    const cx = (bb.xMin + bb.xMax) / 2;
-    const cy = (bb.yMin + bb.yMax) / 2;
-    const cz = bb.zMax - sZ / 2; // centre Z : sommet brut = bb.zMax
+    // Centre du brut : calé sur le modèle si disponible, sinon à l'origine
+    const cx = bb ? (bb.xMin + bb.xMax) / 2 : 0;
+    const cy = bb ? (bb.yMin + bb.yMax) / 2 : 0;
+    const cz = bb ? bb.zMax - sZ / 2 : sZ / 2; // bas à Z=0 sans modèle
 
     const geo = new THREE.BoxGeometry(sX, sY, sZ);
 
@@ -879,31 +964,44 @@ class Viewer3D {
     this.stockEdges.position.set(cx, cy, cz);
     this.root.add(this.stockEdges);
 
-    // Vérifier que la pièce tient dans le brut
-    const fits = sX >= (bb.xMax - bb.xMin) && sY >= (bb.yMax - bb.yMin) && sZ >= (bb.zMax - bb.zMin);
+    // Vérifier que la pièce tient dans le brut (seulement si un modèle est chargé)
+    const fits = !bb || (sX >= (bb.xMax - bb.xMin) && sY >= (bb.yMax - bb.yMin) && sZ >= (bb.zMax - bb.zMin));
     return { fits };
   }
 }
 
 // ═══════════════════════════════════════════════════════════════
 // 7 — CONTRÔLEUR UI
+// ---------------------------------------------------------------
+// Gère les interactions entre le panneau de contrôle et les
+// modules de calcul (parser, toolpath, G-code, viewer).
+//
+// État global de l'application (appState) :
+//   tris  : tableau de triangles du STL chargé
+//   bbox  : boîte englobante du modèle
+//   grid  : grille spatiale d'accélération
+//   gcode : texte G-code généré (pour le téléchargement)
 // ═══════════════════════════════════════════════════════════════
 
 let appState = { tris: null, bbox: null, grid: null, gcode: null };
 const viewer = new Viewer3D();
 
-// Utilitaires DOM
+// Raccourci DOM : $ remplace document.getElementById
 const $ = id => document.getElementById(id);
+
+// Affiche un message coloré sous un champ (ok=vert, err=rouge, inf=bleu)
 function setStatus(id, type, msg) {
   const el = $(id);
   el.className = `status ${type}`;
   el.textContent = msg;
 }
+
+// Met à jour la barre de progression (pct entre 0 et 1)
 function progress(pct) {
   $('progFill').style.width = (pct * 100).toFixed(0) + '%';
 }
 
-// Calcul automatique du pas en mm
+// ── Calcul automatique du pas en mm depuis % du diamètre ──
 function updateStepMm() {
   const diam = +$('toolDiam').value;
   const pct  = +$('stepPct').value;
@@ -1009,7 +1107,7 @@ $('btnGen').addEventListener('click', async () => {
       `<b>${waypoints.length.toLocaleString('fr')}</b> points au total`,
       `<b>${cutPoints.toLocaleString('fr')}</b> points de découpe (G1 XYZ simultanés)`,
       `<b>${gcodeLines.toLocaleString('fr')}</b> lignes G-code`,
-      `Longueur parcours : <b>${(totalPathLen/1000).toFixed(2)} m</b>`,
+      `Longueur parcours : <b>${totalPathLen.toFixed(0)} mm</b>`,
       `Temps estimé (avance seule) : <b>${timeCutMin} min</b>`,
       `Grille : <b>${estX} × ${estY}</b> points/ligne`
     ].join('<br>');
@@ -1106,26 +1204,37 @@ function prefillStock(bb) {
 }
 
 // ── Mettre à jour la visualisation 3D du brut ──
+// Fonctionne avec ou sans modèle STL chargé
 function updateStock() {
-  if (!appState.bbox) return;
-  const bb = appState.bbox;
+  const bb = appState.bbox; // null si aucun STL chargé
   const sX = +$('stockX').value, sY = +$('stockY').value, sZ = +$('stockZ').value;
   if (sX > 0 && sY > 0 && sZ > 0) {
     const result = viewer.setStock(bb, sX, sY, sZ);
-    const mW = (bb.xMax - bb.xMin).toFixed(1);
-    const mD = (bb.yMax - bb.yMin).toFixed(1);
-    const mH = (bb.zMax - bb.zMin).toFixed(1);
-    if (!result.fits) {
-      setStatus('stockStatus', 'err',
-        `⚠ Brut (${sX}×${sY}×${sZ}) plus petit que la pièce (${mW}×${mD}×${mH} mm)`);
+    if (bb) {
+      // Avec modèle : comparer les dimensions brut vs pièce
+      const mW = (bb.xMax - bb.xMin).toFixed(1);
+      const mD = (bb.yMax - bb.yMin).toFixed(1);
+      const mH = (bb.zMax - bb.zMin).toFixed(1);
+      if (!result.fits) {
+        setStatus('stockStatus', 'err',
+          `⚠ Brut (${sX}×${sY}×${sZ}) plus petit que la pièce (${mW}×${mD}×${mH} mm)`);
+      } else {
+        setStatus('stockStatus', 'ok',
+          `✓ Brut ${sX}×${sY}×${sZ} mm — pièce ${mW}×${mD}×${mH} mm`);
+      }
     } else {
-      setStatus('stockStatus', 'ok',
-        `✓ Brut ${sX}×${sY}×${sZ} mm — pièce ${mW}×${mD}×${mH} mm`);
+      // Sans modèle : affichage simple des dimensions du brut
+      setStatus('stockStatus', 'ok', `✓ Brut par défaut : ${sX}×${sY}×${sZ} mm`);
     }
     viewer.toggleStock($('chkStock').checked);
   }
-  updateAxesPos();
+  if (bb) updateAxesPos(); // axes pertinents uniquement avec un modèle
 }
+
+// ── Affichage initial au chargement de la page ──
+// Montre le brut avec les dimensions par défaut (100×100×30 mm) avant tout import STL
+updateStock();
+viewer.fitView({ xMin: -50, xMax: 50, yMin: -50, yMax: 50, zMin: 0, zMax: 30 });
 
 </script>
 </body>

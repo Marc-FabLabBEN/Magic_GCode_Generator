@@ -60,6 +60,32 @@ Download `gcode3d-generator.html`, open it in your browser — that's it.
 
 ---
 
+## Changelog
+
+### v1.3b — [13/06/2026]
+- Brut affiché par défaut au lancement (100×100×30 mm) avant tout import STL
+- Parcours outil en cyan vif (`#00E5FF`) — meilleure visibilité sur fond sombre
+- Longueur du parcours affichée en mm (au lieu de m)
+- Commentaires du code enrichis pour faciliter la lecture par un tiers
+- Mentions de licence dans l'en-tête de chaque fichier G-code généré
+
+### v1.3 — [11/06/2026]
+- Brut 3D translucide avec arêtes dorées, dimensions auto depuis le STL
+- 5 modes d'origine pièce (brut, centre XY, coin, coords STL, coords manuelles)
+- Correction bug toggle wireframe modèle STL
+- Valeurs par défaut usinage : avance 850, plongée 300, broche 14 500 tr/min
+
+### v1.2 — Visualisation 3D
+- Visualiseur Three.js r128 : modèle + parcours + axes XYZ
+- Support touch (mobile)
+
+### v1.1 — Première version publique
+- Génération G-code raster zigzag X/Y/croisé
+- Compatibilité GRBL, Mach3/4, LinuxCNC
+- Calcul asynchrone avec barre de progression
+
+---
+
 ## Road map
 
 Voir [`FONCTIONNALITES.md`](./FONCTIONNALITES.md) pour la liste complète des fonctionnalités prévues (V1.4 → V2.0).  
