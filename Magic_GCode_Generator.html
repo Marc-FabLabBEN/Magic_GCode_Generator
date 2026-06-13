@@ -63,11 +63,15 @@ input[type=file]{display:none;}
   <h1>⚙ G-CODE 3D — USINAGE SIMULTANÉ XYZ</h1>
 
   <div class="sec">
-    <div class="sec-t">Fichier STL</div>
-    <input type="file" id="stlFile" accept=".stl">
+    <div class="sec-t">Fichier source</div>
+    <input type="file" id="stlFile" accept=".stl,.gcode,.nc,.tap,.cnc">
     <button class="btn btn-load" onclick="document.getElementById('stlFile').click()">
-      📂 Charger un fichier STL…
+      📂 Charger un fichier…
     </button>
+    <div style="font-size:9px;color:#4a6880;margin-top:3px;line-height:1.6;">
+      STL → génération de parcours<br>
+      G-code (.gcode .nc .tap) → visualisation 3D
+    </div>
     <div class="status" id="fileStatus"></div>
   </div>
 
@@ -165,7 +169,7 @@ input[type=file]{display:none;}
       </div>
     </div>
     <div class="field">
-      <label>Origine pièce (définit X0 Y0 Z0)</label>
+      <label>OP — Origine Programme (X0 Y0 Z0 du G-code)</label>
       <select id="origin">
         <option value="stock">Sommet du brut — coin bas-gauche (défaut)</option>
         <option value="top-center">Centre XY — sommet pièce = Z0</option>
@@ -194,6 +198,59 @@ input[type=file]{display:none;}
         <label>Z origine (mm)</label>
         <input type="number" id="originZ" value="0" step="0.001">
       </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t">Machine</div>
+    <div style="font-size:9px;color:#4a6880;margin-bottom:6px;line-height:1.6;">Surface utile (courses)</div>
+    <div class="row2">
+      <div class="field">
+        <label>Course X (mm)</label>
+        <input type="number" id="machineX" value="1000" min="10" step="10">
+      </div>
+      <div class="field">
+        <label>Course Y (mm)</label>
+        <input type="number" id="machineY" value="1200" min="10" step="10">
+      </div>
+    </div>
+    <div class="field" style="margin-top:6px;">
+      <label><span style="color:#ff6600;">OM</span> — coin de la surface utile</label>
+      <select id="omCorner">
+        <option value="BL">Bas-gauche (standard)</option>
+        <option value="TL" selected>Haut-gauche</option>
+        <option value="BR">Bas-droit</option>
+        <option value="TR">Haut-droit</option>
+      </select>
+    </div>
+    <div style="font-size:9px;color:#4a6880;margin-top:8px;margin-bottom:4px;line-height:1.6;">
+      <span style="color:#00e676;">Origine (00)</span> — distance depuis OM (mm)
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>00 — X depuis OM (mm)</label>
+        <input type="number" id="zeroX" value="54" min="0" step="1">
+      </div>
+      <div class="field">
+        <label>00 — Y depuis OM (mm)</label>
+        <input type="number" id="zeroY" value="1040" min="0" step="1">
+      </div>
+    </div>
+    <div style="font-size:9px;color:#4a6880;margin-top:8px;margin-bottom:4px;line-height:1.6;">
+      <span style="color:#4fc3f7;">OP</span> — G-code 0,0 — distance depuis OM (mm)
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>OP — X depuis OM (mm)</label>
+        <input type="number" id="omX" value="54" min="0" step="1">
+      </div>
+      <div class="field">
+        <label>OP — Y depuis OM (mm)</label>
+        <input type="number" id="omY" value="1040" min="0" step="1">
+      </div>
+    </div>
+    <div style="font-size:9px;color:#4a6880;margin-top:3px;line-height:1.6;">
+      <span style="color:#ff6600;">OM</span> &rarr; <span style="color:#00e676;">00</span> &rarr; <span style="color:#4fc3f7;">OP</span> — distances toujours positives depuis OM
     </div>
   </div>
 
@@ -609,16 +666,22 @@ function writeGCode(waypoints, params) {
 // Solution : un objet racine (this.root) est pivoté de -90° sur X
 // → tout ce qu'on ajoute à root utilise les coords CNC (Z-up).
 //
+// Tout est affiché en coordonnées G-code : OP = (0,0,0) dans le viewer.
+// Le modèle STL est décalé de -offset_WCS pour passer en G-code.
+// Le brut et le parcours sont positionnés directement en G-code.
+//
 // Hiérarchie de la scène :
 //   scene
-//   ├── gridHelper     (grille de référence, plan XY Three.js = table CNC)
-//   └── root  (rotation X -90°)
-//       ├── modelMesh  (surface STL solide)
-//       ├── modelWire  (filaire STL)
-//       ├── pathLine   (parcours outil)
-//       ├── stockMesh  (brut semi-transparent)
-//       ├── stockEdges (arêtes du brut)
-//       └── axesGroup  (flèches XYZ)
+//   ├── gridHelper      (surface utile machine, coin à l'OP X0 Y0)
+//   └── root  (rotation X -90°, repère CNC Z-up → Three.js Y-up)
+//       ├── modelGroup  (décalé de -offset_WCS pour être en coordonnées G-code)
+//       │   ├── modelMesh  (surface STL solide)
+//       │   └── modelWire  (filaire STL)
+//       ├── pathLine    (parcours outil, déjà en coordonnées G-code)
+//       ├── gcodeLine   (G-code importé, coordonnées machine telles quelles)
+//       ├── stockMesh   (brut semi-transparent, en coordonnées G-code)
+//       ├── stockEdges  (arêtes du brut)
+//       └── axesGroup   (flèches XYZ ancrées à l'OP = 0,0,0)
 // ═══════════════════════════════════════════════════════════════
 
 class Viewer3D {
@@ -649,11 +712,21 @@ class Viewer3D {
     d2.position.set(-2, 1, -1);
     this.scene.add(d2);
 
-    // Grille de référence (plan XY CNC = plan XZ Three.js après rotation)
-    this.gridHelper = new THREE.GridHelper(200, 20, 0x1a3050, 0x112030);
+    // Surface utile machine (mise à jour via updateGrid)
+    this._machineX = 1000;
+    this._machineY = 1200;
+    // Grille initiale : 1000×1200, OP à (150,150) dans le repère machine
+    // Centre grille en G-code : (1000/2-150, 1200/2-150) = (350, 450)
+    this.gridHelper = new THREE.GridHelper(1200, 30, 0x1a3050, 0x112030);
+    this.gridHelper.position.set(350, 0, -450);
+    this.gridHelper.scale.set(1000/1200, 1, 1);
     this.scene.add(this.gridHelper);
 
-    // Groupe axes XYZ (ajouté à root → espace CNC)
+    // Groupe modèle : décalé de -offset_WCS pour afficher en coordonnées G-code
+    this.modelGroup = new THREE.Group();
+    this.root.add(this.modelGroup);
+
+    // Groupe axes XYZ ancrés à l'OP (0,0,0) en G-code
     this.axesGroup = new THREE.Group();
     this.root.add(this.axesGroup);
     this._buildAxes(30);
@@ -664,11 +737,12 @@ class Viewer3D {
     this.theta = 0.65;
     this.phi = 1.05;
 
-    this.modelMesh = null;
-    this.modelWire = null;
-    this.pathLine  = null;
-    this.stockMesh = null;
+    this.modelMesh  = null;
+    this.modelWire  = null;
+    this.pathLine   = null;
+    this.stockMesh  = null;
     this.stockEdges = null;
+    this.gcodeLine  = null; // parcours G-code importé (mode visualisation)
 
     this._setupMouse();
     this._resize();
@@ -826,10 +900,10 @@ class Viewer3D {
     this.renderer.render(this.scene, this.camera);
   }
 
-  // Charge et affiche le modèle STL
-  setModel(tris, bb) {
-    if (this.modelMesh) { this.root.remove(this.modelMesh); this.modelMesh.geometry.dispose(); }
-    if (this.modelWire) { this.root.remove(this.modelWire); this.modelWire = null; }
+  // Charge et affiche le modèle STL en coordonnées STL (le décalage OP est géré par modelGroup)
+  setModel(tris) {
+    if (this.modelMesh) { this.modelGroup.remove(this.modelMesh); this.modelMesh.geometry.dispose(); }
+    if (this.modelWire) { this.modelGroup.remove(this.modelWire); this.modelWire = null; }
 
     const positions = new Float32Array(tris.length * 9);
     let idx = 0;
@@ -842,83 +916,263 @@ class Viewer3D {
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.computeVertexNormals();
 
-    // Mesh solide semi-transparent
     const mat = new THREE.MeshPhongMaterial({
-      color: 0x3070a0,
-      emissive: 0x0a1828,
-      specular: 0x88ccff,
-      shininess: 60,
-      transparent: true,
-      opacity: 0.72,
-      side: THREE.DoubleSide
+      color: 0x3070a0, emissive: 0x0a1828, specular: 0x88ccff, shininess: 60,
+      transparent: true, opacity: 0.72, side: THREE.DoubleSide
     });
     this.modelMesh = new THREE.Mesh(geo, mat);
-    this.root.add(this.modelMesh);
+    this.modelGroup.add(this.modelMesh);
 
-    // Fil de fer par-dessus (stocké pour pouvoir le masquer)
     const wmat = new THREE.MeshBasicMaterial({ color: 0x2060a0, wireframe: true, transparent: true, opacity: 0.12 });
     this.modelWire = new THREE.Mesh(geo, wmat);
-    this.root.add(this.modelWire);
+    this.modelGroup.add(this.modelWire);
 
-    this.fitView(bb);
     this.toggleModel(true);
   }
 
-  // Affiche le parcours outil sous forme de ligne colorée
-  // origin : offset WCS en coords modèle (pour re-projeter le parcours G-code → coords modèle)
-  setToolpath(waypoints, bb, origin) {
-    if (this.pathLine) { this.root.remove(this.pathLine); this.pathLine.geometry.dispose(); }
+  // Décale le groupe modèle pour passer des coordonnées STL aux coordonnées G-code.
+  // À appeler chaque fois que l'OP change.
+  // Le groupe modelGroup.position = -offset_WCS : ainsi un vertex à (stl.x, stl.y, stl.z)
+  // apparaît à (stl.x - ox, stl.y - oy, stl.z - oz) = coordonnées G-code.
+  setModelOffset(ox, oy, oz) {
+    this.modelGroup.position.set(-ox, -oy, -oz);
+  }
+
+  // Affiche le parcours outil en coordonnées G-code directes (OP = 0,0,0).
+  // Les waypoints sont déjà en G-code — aucune re-projection nécessaire.
+  setToolpath(waypoints) {
+    if (this.pathLine) { this.root.remove(this.pathLine); this.pathLine.geometry.dispose(); this.pathLine = null; }
 
     const cuts = waypoints.filter(w => w.type === 'cut' || w.type === 'plunge');
     if (cuts.length < 2) return;
 
-    const ox = origin ? origin.x : 0;
-    const oy = origin ? origin.y : 0;
-    const oz = origin ? origin.z : 0;
-
     const positions = new Float32Array(cuts.length * 3);
-    const colors = new Float32Array(cuts.length * 3);
+    const colors    = new Float32Array(cuts.length * 3);
     for (let i = 0; i < cuts.length; i++) {
       const { x, y, z } = cuts[i];
-      // Les waypoints sont en coords G-code ; on rajoute l'offset pour revenir en coords modèle
-      positions[i*3] = x + ox; positions[i*3+1] = y + oy; positions[i*3+2] = z + oz;
-      // Cyan vif (#00E5FF) — couleur standard des parcours outil en CAM,
-      // contraste maximal avec le fond sombre, le modèle bleu et le brut doré
+      // Coordonnées G-code directes — OP est à (0,0,0) dans le viewer
+      positions[i*3] = x; positions[i*3+1] = y; positions[i*3+2] = z;
+      // Cyan vif — standard CAM, contraste maximal avec fond sombre + modèle bleu + brut doré
       colors[i*3] = 0.0; colors[i*3+1] = 0.9; colors[i*3+2] = 1.0;
     }
 
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.setAttribute('color',    new THREE.BufferAttribute(colors,    3));
     const mat = new THREE.LineBasicMaterial({ vertexColors: true, linewidth: 1 });
     this.pathLine = new THREE.Line(geo, mat);
     this.root.add(this.pathLine);
     this.togglePath(true);
   }
 
+  // Recadre la caméra sur une bounding box (en coordonnées G-code).
+  // Ne touche pas au GridHelper — celui-ci est géré par updateGrid().
   fitView(bb) {
     const cx = (bb.xMin + bb.xMax) / 2;
     const cy = (bb.yMin + bb.yMax) / 2;
     const cz = (bb.zMin + bb.zMax) / 2;
-    const size = Math.max(bb.xMax-bb.xMin, bb.yMax-bb.yMin, bb.zMax-bb.zMin);
+    const size = Math.max(bb.xMax-bb.xMin, bb.yMax-bb.yMin, bb.zMax-bb.zMin, 10);
 
-    // En Three.js (après rotation X-90°), CNC-center → Three.js center
+    // Conversion CNC → Three.js : (X_cnc, Y_cnc, Z_cnc) → (X_cnc, Z_cnc, -Y_cnc)
     this.center.set(cx, cz, -cy);
     this.radius = size * 1.8;
 
-    // Adapter la grille à la taille du modèle
-    this.scene.remove(this.gridHelper);
-    const gSize = Math.ceil(size * 2 / 10) * 10;
-    this.gridHelper = new THREE.GridHelper(gSize, 20, 0x1a3050, 0x112030);
-    this.gridHelper.position.set(cx, 0, -cy);
-    this.scene.add(this.gridHelper);
-
-    // Reconstruire les axes à la bonne taille (35% de la plus grande dimension)
-    const axSize = Math.max(size * 0.35, 5);
+    // Reconstruire les axes proportionnels à la scène (taille réduite)
+    const axSize = Math.max(size * 0.12, 5);
     this._buildAxes(axSize);
 
     this._updateCamera();
   }
+
+  // Crée un sprite texte (billboard) utilisable dans le repère CNC (root).
+  _makeTextSprite(text, color, scaleW, scaleH) {
+    const canvas = document.createElement('canvas');
+    const fontSize = 56;
+    // Largeur adaptive : évite le clipping sur les chiffres à 4 digits
+    canvas.width  = Math.max(128, text.length * 38 + 24);
+    canvas.height = 96;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = color;
+    ctx.font = `bold ${fontSize}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+    const tex = new THREE.CanvasTexture(canvas);
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+    const sp = new THREE.Sprite(mat);
+    sp.scale.set(scaleW, scaleH, 1);
+    sp.renderOrder = 50;
+    return sp;
+  }
+
+  // Met à jour le quadrillage et ses décorations (repères, marqueur OM, marqueur 00).
+  //
+  // Hiérarchie de coordonnées :
+  //   OM (orange)  = coin de la machine, fixé par les capteurs.
+  //   00 (vert)    = Origine opérateur, à distance (zeroX, zeroY) depuis OM.
+  //   OP (cyan)    = G-code 0,0,0 — à distance (omX, omY) depuis OM.
+  //   omCorner     = coin où est physiquement l'OM ('BL','TL','BR','TR').
+  //
+  // omX, omY, zeroX, zeroY = distances positives depuis OM (jamais négatives).
+  // Le sens de l'axe machine dépend du coin : TL/TR → Y machine croît vers le bas.
+  updateGrid(machineX, machineY, omX, omY, zeroX, zeroY, omCorner, sZ) {
+    this._machineX = machineX;
+    this._machineY = machineY;
+
+    // ── Bornes G-code de la grille (OP = 0,0) ──
+    // La grille s'étend toujours de xMin à xMax et yMin à yMax en G-code.
+    const xMin = -omX, xMax = machineX - omX;
+    const yMin = -omY, yMax = machineY - omY;
+
+    // ── Grille (scène Three.js, Y = CNC Z) ──
+    this.scene.remove(this.gridHelper);
+    const size = Math.max(machineX, machineY);
+    const divs = Math.min(60, Math.max(10, Math.round(size / 50)));
+    this.gridHelper = new THREE.GridHelper(size, divs, 0x1a3050, 0x112030);
+    const cx_g = (xMin + xMax) / 2;
+    const cy_g = (yMin + yMax) / 2;
+    this.gridHelper.position.set(cx_g, -sZ, -cy_g);
+    this.gridHelper.scale.set(machineX / size, 1, machineY / size);
+    this.scene.add(this.gridHelper);
+
+    // ── Décorations dans root (espace CNC) ──
+    if (this.gridDecoGroup) this.root.remove(this.gridDecoGroup);
+    this.gridDecoGroup = new THREE.Group();
+    this.root.add(this.gridDecoGroup);
+
+    const tableZ   = -sZ;
+    const maxDim   = Math.max(machineX, machineY);
+    const cs       = maxDim * 0.018;   // taille des croix
+    const offset   = cs * 2.0;
+    const lblW     = cs * 2.6;
+    const lblH     = cs * 1.3;
+
+    // ── Position G-code de chaque repère selon le coin de l'OM ──
+    const omOnTop   = (omCorner === 'TL' || omCorner === 'TR');
+    const omOnRight = (omCorner === 'BR' || omCorner === 'TR');
+
+    // Coordonnées G-code de l'OM
+    const omX_g = omOnRight ? xMax : xMin;
+    const omY_g = omOnTop   ? yMax : yMin;
+
+    // Coordonnées G-code de l'Origine (00) — formule coin-dépendante (symétrique à OM)
+    const zX_g = omOnRight ? xMax - zeroX : xMin + zeroX;
+    const zY_g = omOnTop   ? yMax - zeroY : yMin + zeroY;
+
+    // ── Conversion G-code → coordonnée machine pour les labels ──
+    const toXMach = xi => Math.round(omOnRight ? xMax - xi : xi - xMin);
+    const toYMach = yi => Math.round(omOnTop   ? yMax - yi : yi - yMin);
+
+    // ── Bord et direction des labels ──
+    // Axe X : labels sur le bord adjacent à l'OM en Y
+    const xEdgeY  = omY_g;                    // bord Y des labels X
+    const xDir    = omOnTop ? 1 : -1;         // direction sortante (hors grille)
+    // Axe Y : labels sur le bord adjacent à l'OM en X
+    const yEdgeX  = omX_g;                    // bord X des labels Y
+    const yDir    = omOnRight ? 1 : -1;       // direction sortante
+
+    // ── Marqueur OM (orange) ──
+    this._addCross(omX_g, omY_g, tableZ, cs, 0xff6600);
+    const omLbl = this._makeTextSprite('OM', '#ff6600', lblW, lblH);
+    // Offset label vers l'intérieur de la grille pour ne pas sortir du canvas
+    const omLblOffX = omOnRight ? -cs * 2.5 : cs * 2.5;
+    const omLblOffY = omOnTop   ? -cs * 1.5 : cs * 1.5;
+    omLbl.position.set(omX_g + omLblOffX, omY_g + omLblOffY, tableZ);
+    this.gridDecoGroup.add(omLbl);
+
+    // ── Marqueur Origine 00 (vert) ──
+    // Affiché si 00 est à une distance non nulle de OM (sinon doublon)
+    if (zeroX > 0.5 || zeroY > 0.5) {
+      this._addCross(zX_g, zY_g, tableZ, cs, 0x00e676);
+      const zLbl = this._makeTextSprite('00', '#00e676', lblW, lblH);
+      zLbl.position.set(zX_g + cs * 2.2, zY_g + cs * 0.5, tableZ);
+      this.gridDecoGroup.add(zLbl);
+    }
+
+    // ── Repères sur les bords (coords machine depuis OM) ──
+    const interval = maxDim > 1000 ? 200 : maxDim > 500 ? 100 : 50;
+    const tickMat  = new THREE.LineBasicMaterial({ color: 0x2a4060, depthTest: false });
+
+    // — Axe X : itération en coords machine (0 → machineX par pas interval) —
+    for (let xm = interval; xm <= machineX + 0.01; xm += interval) {
+      const xi = omOnRight ? xMax - xm : xMin + xm;
+      if (xi < xMin - 0.1 || xi > xMax + 0.1) continue;
+      const tgeo = new THREE.BufferGeometry();
+      tgeo.setAttribute('position', new THREE.BufferAttribute(
+        new Float32Array([xi, xEdgeY, tableZ,  xi, xEdgeY + xDir * offset * 0.5, tableZ]), 3));
+      this.gridDecoGroup.add(new THREE.LineSegments(tgeo, tickMat));
+      const sp = this._makeTextSprite(String(Math.round(xm)), '#2a5878', lblW, lblH);
+      sp.position.set(xi, xEdgeY + xDir * offset, tableZ);
+      this.gridDecoGroup.add(sp);
+    }
+    // Label "X" au milieu de l'axe
+    const xAxisLbl = this._makeTextSprite('X', '#4fc3f7', lblW * 1.6, lblH * 1.6);
+    xAxisLbl.position.set((xMin + xMax) / 2, xEdgeY + xDir * offset * 2.2, tableZ);
+    this.gridDecoGroup.add(xAxisLbl);
+
+    // — Axe Y : itération en coords machine (0 → machineY par pas interval) —
+    for (let ym = interval; ym <= machineY + 0.01; ym += interval) {
+      const yi = omOnTop ? yMax - ym : yMin + ym;
+      if (yi < yMin - 0.1 || yi > yMax + 0.1) continue;
+      const tgeo = new THREE.BufferGeometry();
+      tgeo.setAttribute('position', new THREE.BufferAttribute(
+        new Float32Array([yEdgeX, yi, tableZ,  yEdgeX + yDir * offset * 0.5, yi, tableZ]), 3));
+      this.gridDecoGroup.add(new THREE.LineSegments(tgeo, tickMat));
+      const sp = this._makeTextSprite(String(Math.round(ym)), '#2a5878', lblW, lblH);
+      sp.position.set(yEdgeX + yDir * offset, yi, tableZ);
+      this.gridDecoGroup.add(sp);
+    }
+    // Label "Y" au milieu de l'axe
+    const yAxisLbl = this._makeTextSprite('Y', '#4fc3f7', lblW * 1.6, lblH * 1.6);
+    yAxisLbl.position.set(yEdgeX + yDir * offset * 2.2, (yMin + yMax) / 2, tableZ);
+    this.gridDecoGroup.add(yAxisLbl);
+  }
+
+  // Dessine une croix (+) dans gridDecoGroup
+  _addCross(x, y, z, size, colorHex) {
+    const pts = new Float32Array([
+      x - size, y, z,  x + size, y, z,
+      x, y - size, z,  x, y + size, z
+    ]);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pts, 3));
+    const seg = new THREE.LineSegments(geo,
+      new THREE.LineBasicMaterial({ color: colorHex, depthTest: false }));
+    seg.renderOrder = 60;
+    this.gridDecoGroup.add(seg);
+  }
+
+  // ── Visualisation d'un G-code importé ────────────────────────
+  // Chaque segment est affiché en fonction de son type :
+  //   G0 (rapid) → jaune  : déplacement hors matière
+  //   G1 (feed)  → cyan   : déplacement de coupe
+  // On utilise LineSegments (paires de points) pour pouvoir
+  // colorer chaque segment indépendamment via vertexColors.
+  setGCodePath(moves) {
+    if (this.gcodeLine) { this.root.remove(this.gcodeLine); this.gcodeLine.geometry.dispose(); this.gcodeLine = null; }
+    if (!moves || moves.length === 0) return;
+
+    const positions = new Float32Array(moves.length * 6); // 2 pts × 3 coords
+    const colors    = new Float32Array(moves.length * 6); // 2 pts × 3 canaux RGB
+
+    for (let i = 0; i < moves.length; i++) {
+      const {x0,y0,z0,x1,y1,z1,type} = moves[i];
+      positions[i*6]  =x0; positions[i*6+1]=y0; positions[i*6+2]=z0;
+      positions[i*6+3]=x1; positions[i*6+4]=y1; positions[i*6+5]=z1;
+      // G0 jaune (1, 0.8, 0) · G1 cyan (0, 0.9, 1)
+      const [r,g,b] = type === 'rapid' ? [1,0.8,0] : [0,0.9,1];
+      colors[i*6]=r; colors[i*6+1]=g; colors[i*6+2]=b;
+      colors[i*6+3]=r; colors[i*6+4]=g; colors[i*6+5]=b;
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('color',    new THREE.BufferAttribute(colors,    3));
+    this.gcodeLine = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true }));
+    this.root.add(this.gcodeLine);
+  }
+
+  toggleGCode(v) { if (this.gcodeLine) this.gcodeLine.visible = v; }
 
   toggleModel(v) {
     if (this.modelMesh) this.modelMesh.visible = v;
@@ -930,42 +1184,31 @@ class Viewer3D {
     if (this.stockEdges) this.stockEdges.visible = v;
   }
 
-  // ── Visualisation du brut ──────────────────────────────────────
-  // bb    : bounding box du modèle STL (coords CNC), ou null si aucun modèle
-  // sX/sY/sZ : dimensions du brut
-  // Sans modèle : brut centré à l'origine, bas à Z=0
-  // Avec modèle : brut centré XY sur le modèle, sommet = bb.zMax
-  setStock(bb, sX, sY, sZ) {
-    // Supprimer l'ancien brut s'il existe
+  // Visualisation du brut en coordonnées G-code.
+  // cx_g / cy_g / cz_g : centre du brut en G-code (calculé par le controller selon l'OP).
+  // bb : bbox STL (utilisée uniquement pour vérifier que la pièce tient dans le brut).
+  setStock(sX, sY, sZ, cx_g, cy_g, cz_g, bb) {
     if (this.stockMesh)  { this.root.remove(this.stockMesh);  this.stockMesh.geometry.dispose();  this.stockMesh  = null; }
     if (this.stockEdges) { this.root.remove(this.stockEdges); this.stockEdges.geometry.dispose(); this.stockEdges = null; }
     if (!sX || !sY || !sZ) return { fits: true };
 
-    // Centre du brut : calé sur le modèle si disponible, sinon à l'origine
-    const cx = bb ? (bb.xMin + bb.xMax) / 2 : 0;
-    const cy = bb ? (bb.yMin + bb.yMax) / 2 : 0;
-    const cz = bb ? bb.zMax - sZ / 2 : sZ / 2; // bas à Z=0 sans modèle
-
     const geo = new THREE.BoxGeometry(sX, sY, sZ);
 
-    // Faces semi-transparentes (couleur bois brut / aluminium)
     const matFaces = new THREE.MeshBasicMaterial({
       color: 0xb08030, transparent: true, opacity: 0.09,
       side: THREE.DoubleSide, depthWrite: false
     });
     this.stockMesh = new THREE.Mesh(geo, matFaces);
-    this.stockMesh.position.set(cx, cy, cz);
+    this.stockMesh.position.set(cx_g, cy_g, cz_g);
     this.root.add(this.stockMesh);
 
-    // Arêtes nettes
     const edgesGeo = new THREE.EdgesGeometry(geo);
     const matEdges = new THREE.LineBasicMaterial({ color: 0xd4a030, transparent: true, opacity: 0.7 });
     this.stockEdges = new THREE.LineSegments(edgesGeo, matEdges);
-    this.stockEdges.position.set(cx, cy, cz);
+    this.stockEdges.position.set(cx_g, cy_g, cz_g);
     this.root.add(this.stockEdges);
 
-    // Vérifier que la pièce tient dans le brut (seulement si un modèle est chargé)
-    const fits = !bb || (sX >= (bb.xMax - bb.xMin) && sY >= (bb.yMax - bb.yMin) && sZ >= (bb.zMax - bb.zMin));
+    const fits = !bb || (sX >= (bb.xMax-bb.xMin) && sY >= (bb.yMax-bb.yMin) && sZ >= (bb.zMax-bb.zMin));
     return { fits };
   }
 }
@@ -983,7 +1226,8 @@ class Viewer3D {
 //   gcode : texte G-code généré (pour le téléchargement)
 // ═══════════════════════════════════════════════════════════════
 
-let appState = { tris: null, bbox: null, grid: null, gcode: null };
+// mode : 'stl' (génération parcours) | 'gcode' (visualisation G-code importé)
+let appState = { tris: null, bbox: null, grid: null, gcode: null, waypoints: null, mode: 'stl' };
 const viewer = new Viewer3D();
 
 // Raccourci DOM : $ remplace document.getElementById
@@ -1011,40 +1255,108 @@ $('toolDiam').addEventListener('input', updateStepMm);
 $('stepPct').addEventListener('input', updateStepMm);
 updateStepMm();
 
-// ── Chargement du fichier STL ──
+// ── Chargement de fichier — routage par extension ──
+// Reset immédiat de la valeur de l'input : permet de recharger le même fichier
+// (sans reset, le navigateur ne déclenche pas 'change' si le fichier n'a pas changé)
 $('stlFile').addEventListener('change', e => {
   const file = e.target.files[0];
+  e.target.value = '';   // reset pour autoriser le rechargement du même fichier
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = ev => {
-    try {
-      setStatus('fileStatus', 'inf', `Analyse de ${file.name}…`);
-      const tris = parseSTL(ev.target.result);
-      if (!tris || tris.length === 0) throw new Error('Aucun triangle lu — fichier invalide ?');
+  const ext = file.name.split('.').pop().toLowerCase();
 
-      const bbox = bboxOf(tris);
-      const grid = new SpatialGrid(tris, bbox);
-      appState = { tris, bbox, grid, gcode: null };
+  if (ext === 'stl') {
+    // ── Mode STL : génération de parcours ──
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        setStatus('fileStatus', 'inf', `Analyse de ${file.name}…`);
+        const tris = parseSTL(ev.target.result);
+        if (!tris || tris.length === 0) throw new Error('Aucun triangle lu — fichier invalide ?');
 
-      const dims = [
-        (bbox.xMax-bbox.xMin).toFixed(1),
-        (bbox.yMax-bbox.yMin).toFixed(1),
-        (bbox.zMax-bbox.zMin).toFixed(1)
-      ];
-      setStatus('fileStatus', 'ok',
-        `✓ ${tris.length.toLocaleString('fr-FR')} triangles — ${dims[0]} × ${dims[1]} × ${dims[2]} mm`);
+        const bbox = bboxOf(tris);
+        const grid = new SpatialGrid(tris, bbox);
+        appState = { tris, bbox, grid, gcode: null, waypoints: null, mode: 'stl' };
 
-      viewer.setModel(tris, bbox);
-      prefillCustomOrigin(bbox);
-      prefillStock(bbox);
-      updateStock();
-      $('btnGen').disabled = false;
-    } catch(err) {
-      setStatus('fileStatus', 'err', '✗ ' + err.message);
-    }
-  };
-  reader.onerror = () => setStatus('fileStatus', 'err', '✗ Erreur lecture fichier');
-  reader.readAsArrayBuffer(file);
+        const dims = [
+          (bbox.xMax-bbox.xMin).toFixed(1),
+          (bbox.yMax-bbox.yMin).toFixed(1),
+          (bbox.zMax-bbox.zMin).toFixed(1)
+        ];
+        setStatus('fileStatus', 'ok',
+          `✓ ${tris.length.toLocaleString('fr-FR')} triangles — ${dims[0]} × ${dims[1]} × ${dims[2]} mm`);
+
+        // Nettoyer le G-code éventuel du mode précédent
+        viewer.setGCodePath([]);
+        viewer.setModel(tris);
+        prefillCustomOrigin(bbox);
+        prefillStock(bbox);
+
+        // Calculer l'offset OP et positionner tout en G-code
+        repaintAll();
+
+        // Recadrer la caméra sur la bbox G-code du modèle
+        const o = getWCSOrigin(bbox);
+        viewer.fitView({
+          xMin: bbox.xMin - o.x, xMax: bbox.xMax - o.x,
+          yMin: bbox.yMin - o.y, yMax: bbox.yMax - o.y,
+          zMin: bbox.zMin - o.z, zMax: bbox.zMax - o.z
+        });
+
+        $('btnGen').disabled = false;
+        setStatus('genStatus', '');
+        $('genStats').innerHTML = '';
+      } catch(err) {
+        setStatus('fileStatus', 'err', '✗ ' + err.message);
+      }
+    };
+    reader.onerror = () => setStatus('fileStatus', 'err', '✗ Erreur lecture fichier');
+    reader.readAsArrayBuffer(file);
+
+  } else if (['gcode','nc','tap','cnc'].includes(ext)) {
+    // ── Mode G-code : visualisation du parcours importé ──
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        setStatus('fileStatus', 'inf', `Analyse de ${file.name}…`);
+        const { moves, totalFeedLen } = parseGCode(ev.target.result);
+        if (moves.length === 0) throw new Error('Aucun déplacement trouvé — fichier vide ou format non reconnu');
+
+        const bbox = bboxOfMoves(moves);
+        appState = { tris: null, bbox, grid: null, gcode: null, mode: 'gcode' };
+
+        const feedMoves  = moves.filter(m => m.type === 'feed').length;
+        const rapidMoves = moves.filter(m => m.type === 'rapid').length;
+
+        setStatus('fileStatus', 'ok',
+          `✓ ${moves.length} segments — ${feedMoves} G1 (coupe) · ${rapidMoves} G0 (rapide)`);
+
+        // Statistiques dans le panneau
+        $('genStats').innerHTML = [
+          `<b>${feedMoves.toLocaleString('fr')}</b> mouvements de coupe G1 <span style="color:#00e5ff">■</span>`,
+          `<b>${rapidMoves.toLocaleString('fr')}</b> déplacements rapides G0 <span style="color:#ffcc00">■</span>`,
+          `Zone : <b>${(bbox.xMax-bbox.xMin).toFixed(1)} × ${(bbox.yMax-bbox.yMin).toFixed(1)} × ${(bbox.zMax-bbox.zMin).toFixed(1)} mm</b>`,
+          `Longueur parcours coupe : <b>${totalFeedLen.toFixed(0)} mm</b>`
+        ].join('<br>');
+
+        // Affichage dans le viewer
+        viewer.setGCodePath(moves);
+        viewer.fitView(bbox);
+
+        // Désactiver les contrôles propres au mode STL
+        $('btnGen').disabled = true;
+        $('btnDl').disabled  = true;
+        setStatus('genStatus', 'inf', 'Mode G-code — charger un STL pour générer un parcours');
+      } catch(err) {
+        setStatus('fileStatus', 'err', '✗ ' + err.message);
+      }
+    };
+    reader.onerror = () => setStatus('fileStatus', 'err', '✗ Erreur lecture fichier');
+    reader.readAsText(file);
+
+  } else {
+    setStatus('fileStatus', 'err',
+      `✗ Format non supporté (.${ext}) — attendu : .stl · .gcode · .nc · .tap`);
+  }
 });
 
 // ── Génération du parcours ──
@@ -1096,6 +1408,7 @@ $('btnGen').addEventListener('click', async () => {
 
     const gcode = writeGCode(waypoints, params);
     appState.gcode = gcode;
+    appState.waypoints = waypoints; // stockés pour re-projection si le brut ou l'origine changent
 
     const gcodeLines = gcode.split('\n').length;
     const cutPoints = waypoints.filter(w => w.type === 'cut').length;
@@ -1113,8 +1426,7 @@ $('btnGen').addEventListener('click', async () => {
     ].join('<br>');
 
     progress(1);
-    viewer.setToolpath(waypoints, bbox, getWCSOriginFromBbox(bbox));
-    updateAxesPos();
+    repaintAll();
     $('btnDl').disabled = false;
     $('btnGen').disabled = false;
 
@@ -1142,47 +1454,131 @@ $('btnDl').addEventListener('click', () => {
 // ── Toggles d'affichage ──
 $('chkModel').addEventListener('change', e => viewer.toggleModel(e.target.checked));
 $('chkStock').addEventListener('change', e => viewer.toggleStock(e.target.checked));
-$('chkPath').addEventListener('change',  e => viewer.togglePath(e.target.checked));
+$('chkPath').addEventListener('change',  e => {
+  viewer.togglePath(e.target.checked);    // parcours généré depuis STL
+  viewer.toggleGCode(e.target.checked);   // parcours G-code importé
+});
 $('chkAxes').addEventListener('change',  e => viewer.toggleAxes(e.target.checked));
 
 // ── Modification des dimensions du brut ──
 ['stockX', 'stockY', 'stockZ'].forEach(id =>
   $(id).addEventListener('input', updateStock)
 );
+
+// ── Calcul de la position G-code du 00 (même formule coin-dépendante que updateGrid) ──
+function get00GCode() {
+  const corner = $('omCorner').value;
+  const omX = +$('omX').value, omY = +$('omY').value;
+  const zX  = +$('zeroX').value, zY  = +$('zeroY').value;
+  const mX  = +$('machineX').value, mY = +$('machineY').value;
+  const xMin = -omX, xMax = mX - omX;
+  const yMin = -omY, yMax = mY - omY;
+  const omOnTop   = (corner === 'TL' || corner === 'TR');
+  const omOnRight = (corner === 'BR' || corner === 'TR');
+  return {
+    x: omOnRight ? xMax - zX : xMin + zX,
+    y: omOnTop   ? yMax - zY : yMin + zY
+  };
+}
+
+// ── Surface utile machine + position OP/OM → mise à jour du quadrillage ──
+function refreshGrid() {
+  const sZ = +$('stockZ').value || 30;
+  viewer.updateGrid(
+    +$('machineX').value, +$('machineY').value,
+    +$('omX').value,      +$('omY').value,
+    +$('zeroX').value,    +$('zeroY').value,
+    $('omCorner').value,
+    sZ
+  );
+}
+['machineX', 'machineY', 'omX', 'omY', 'zeroX', 'zeroY'].forEach(id =>
+  $(id).addEventListener('input', refreshGrid)
+);
+$('omCorner').addEventListener('change', refreshGrid);
 $('btnCenter').addEventListener('click', () => {
-  if (appState.bbox) viewer.fitView(appState.bbox);
+  if (appState.bbox) {
+    const o = getWCSOrigin(appState.bbox);
+    viewer.fitView({
+      xMin: appState.bbox.xMin - o.x, xMax: appState.bbox.xMax - o.x,
+      yMin: appState.bbox.yMin - o.y, yMax: appState.bbox.yMax - o.y,
+      zMin: appState.bbox.zMin - o.z, zMax: appState.bbox.zMax - o.z
+    });
+  }
 });
 
 // ── Origine personnalisée : afficher / masquer les champs XYZ ──
 function onOriginChange() {
   const isCustom = $('origin').value === 'custom';
   $('originCustomDiv').style.display = isCustom ? 'block' : 'none';
-  updateAxesPos();
+  repaintAll();
 }
+
 $('origin').addEventListener('change', onOriginChange);
 ['originX', 'originY', 'originZ'].forEach(id =>
-  $(id).addEventListener('input', updateAxesPos)
+  $(id).addEventListener('input', repaintAll)
 );
 
-// ── Calcul et positionnement des axes sur l'origine WCS ──
-function getWCSOriginFromBbox(bb) {
+// ── Calcul de l'offset WCS (position STL du point qui devient X0 Y0 Z0) ──
+function getWCSOrigin(bb) {
   const mode = $('origin').value;
+  const sX = +$('stockX').value, sY = +$('stockY').value;
   if (mode === 'stock') {
     const cx = (bb.xMin + bb.xMax) / 2, cy = (bb.yMin + bb.yMax) / 2;
-    return { x: cx - +$('stockX').value / 2, y: cy - +$('stockY').value / 2, z: bb.zMax };
+    return { x: cx - sX / 2, y: cy - sY / 2, z: bb.zMax };
   }
-  if (mode === 'top-center')  return { x: (bb.xMin+bb.xMax)/2, y: (bb.yMin+bb.yMax)/2, z: bb.zMax };
-  if (mode === 'corner-top')  return { x: bb.xMin, y: bb.yMin, z: bb.zMax };
-  if (mode === 'custom')      return { x: +$('originX').value, y: +$('originY').value, z: +$('originZ').value };
-  return { x: 0, y: 0, z: 0 }; // model
+  if (mode === 'top-center') return { x: (bb.xMin+bb.xMax)/2, y: (bb.yMin+bb.yMax)/2, z: bb.zMax };
+  if (mode === 'corner-top') return { x: bb.xMin, y: bb.yMin, z: bb.zMax };
+  if (mode === 'custom')     return { x: +$('originX').value, y: +$('originY').value, z: +$('originZ').value };
+  return { x: 0, y: 0, z: 0 }; // 'model' : coordonnées STL brutes
 }
 
-function updateAxesPos() {
-  if (!appState.bbox) return;
-  const bb = appState.bbox;
-  const size = Math.max(bb.xMax-bb.xMin, bb.yMax-bb.yMin, bb.zMax-bb.zMin) * 0.35;
-  const o = getWCSOriginFromBbox(bb);
-  viewer.setAxesOrigin(o.x, o.y, o.z, Math.max(size, 5));
+// ── Mise à jour complète du viewer quand l'OP ou le brut change ──
+// Toutes les transformations convergent ici :
+//   1. Décalage du modèle STL → coordonnées G-code (modelGroup)
+//   2. Repositionnement du brut en G-code
+//   3. Re-tracé du parcours outil (déjà en G-code, aucune re-projection)
+//   4. Axes à l'OP (0,0,0)
+function repaintAll() {
+  const { bbox, waypoints, mode } = appState;
+  if (!bbox) return;
+
+  const o = getWCSOrigin(bbox);
+  const sX = +$('stockX').value, sY = +$('stockY').value, sZ = +$('stockZ').value;
+
+  // 1. Décaler le modèle pour l'afficher en G-code
+  viewer.setModelOffset(o.x, o.y, o.z);
+
+  // 2. Centre du brut en G-code :
+  //    XY = centre STL du modèle - offset OP
+  //    Z  = dessus du modèle (bb.zMax) - offset OP en Z - demi-hauteur brut
+  const cx_g = (bbox.xMin + bbox.xMax) / 2 - o.x;
+  const cy_g = (bbox.yMin + bbox.yMax) / 2 - o.y;
+  const cz_g = bbox.zMax - o.z - sZ / 2;
+  const result = viewer.setStock(sX, sY, sZ, cx_g, cy_g, cz_g, bbox);
+  viewer.toggleStock($('chkStock').checked);
+
+  // Feedback dimensions
+  const mW = (bbox.xMax-bbox.xMin).toFixed(1);
+  const mD = (bbox.yMax-bbox.yMin).toFixed(1);
+  const mH = (bbox.zMax-bbox.zMin).toFixed(1);
+  if (!result.fits) {
+    setStatus('stockStatus', 'err', `⚠ Brut (${sX}×${sY}×${sZ}) plus petit que la pièce (${mW}×${mD}×${mH} mm)`);
+  } else {
+    setStatus('stockStatus', 'ok', `✓ Brut ${sX}×${sY}×${sZ} mm — pièce ${mW}×${mD}×${mH} mm`);
+  }
+
+  // 3. Parcours outil (en G-code direct — OP = 0,0,0)
+  if (mode === 'stl' && waypoints) {
+    viewer.setToolpath(waypoints);
+  }
+
+  // 4. Axes ancrés à l'OP = (0,0,0) en G-code
+  const axSize = Math.max(sX, sY, sZ, 20) * 0.12;
+  viewer.setAxesOrigin(0, 0, 0, Math.max(axSize, 5));
+
+  // 5. Grille : la table machine est au bas du brut (G-code Z = -sZ)
+  refreshGrid();
 }
 
 // ── Pré-remplir les champs origine custom avec les coordonnées du modèle ──
@@ -1204,37 +1600,113 @@ function prefillStock(bb) {
 }
 
 // ── Mettre à jour la visualisation 3D du brut ──
-// Fonctionne avec ou sans modèle STL chargé
 function updateStock() {
-  const bb = appState.bbox; // null si aucun STL chargé
+  const bb = appState.bbox;
   const sX = +$('stockX').value, sY = +$('stockY').value, sZ = +$('stockZ').value;
-  if (sX > 0 && sY > 0 && sZ > 0) {
-    const result = viewer.setStock(bb, sX, sY, sZ);
-    if (bb) {
-      // Avec modèle : comparer les dimensions brut vs pièce
-      const mW = (bb.xMax - bb.xMin).toFixed(1);
-      const mD = (bb.yMax - bb.yMin).toFixed(1);
-      const mH = (bb.zMax - bb.zMin).toFixed(1);
-      if (!result.fits) {
-        setStatus('stockStatus', 'err',
-          `⚠ Brut (${sX}×${sY}×${sZ}) plus petit que la pièce (${mW}×${mD}×${mH} mm)`);
-      } else {
-        setStatus('stockStatus', 'ok',
-          `✓ Brut ${sX}×${sY}×${sZ} mm — pièce ${mW}×${mD}×${mH} mm`);
-      }
-    } else {
-      // Sans modèle : affichage simple des dimensions du brut
-      setStatus('stockStatus', 'ok', `✓ Brut par défaut : ${sX}×${sY}×${sZ} mm`);
-    }
+  if (sX <= 0 || sY <= 0 || sZ <= 0) return;
+
+  if (bb) {
+    // Avec modèle : repaintAll gère tout (modèle + brut + parcours + axes + grille)
+    repaintAll();
+  } else {
+    // Sans modèle STL : brut centré sur le 00 (même formule que le marqueur 00 de la grille)
+    const z00 = get00GCode();
+    // Coin bas-gauche du brut = position 00 ; le brut s'étend en +X/+Y depuis ce coin
+    viewer.setStock(sX, sY, sZ, z00.x + sX / 2, z00.y + sY / 2, -sZ / 2, null);
     viewer.toggleStock($('chkStock').checked);
+    // Repère OP au coin bas-gauche de la face supérieure (= position 00, Z=0)
+    const axSize = Math.max(sX, sY, sZ, 20) * 0.12;
+    viewer.setAxesOrigin(z00.x, z00.y, 0, axSize);
+    setStatus('stockStatus', 'ok', `✓ Brut par défaut : ${sX}×${sY}×${sZ} mm — centré sur le 00`);
+    refreshGrid(); // la table monte/descend si sZ change, même sans modèle
   }
-  if (bb) updateAxesPos(); // axes pertinents uniquement avec un modèle
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 8 — PARSER G-CODE (import et visualisation)
+// ---------------------------------------------------------------
+// Machine d'état modale : les valeurs X/Y/Z/F/G persistent
+// d'une ligne à l'autre jusqu'à ce qu'elles soient écrasées.
+// Supporte G90 (absolu) et G91 (incrémental).
+//
+// Retourne un tableau de segments { x0,y0,z0, x1,y1,z1, type }
+//   type 'rapid' → G0 (déplacement rapide, hors matière)
+//   type 'feed'  → G1 (coupe à vitesse d'avance contrôlée)
+// Les G2/G3 (arcs) et autres codes sont ignorés à ce stade.
+// ═══════════════════════════════════════════════════════════════
+
+function parseGCode(text) {
+  const moves = [];
+  let mx=0, my=0, mz=0; // position courante (machine state)
+  let absolute = true;   // G90 par défaut
+  let lastG = 1;         // dernier G modal (G1 par défaut)
+  let totalFeedLen = 0;  // longueur cumulée des mouvements de coupe
+
+  for (const rawLine of text.split('\n')) {
+    // Supprimer les commentaires (; jusqu'en fin de ligne, (…) entre parenthèses)
+    const line = rawLine.replace(/;.*$/, '').replace(/\([^)]*\)/g, '').trim().toUpperCase();
+    if (!line || line === '%') continue;
+
+    // Extraire tous les mots G-code : une lettre suivie d'une valeur numérique
+    const words = {};
+    for (const m of line.matchAll(/([A-Z])([-+]?[\d.]+)/g)) {
+      words[m[1]] = parseFloat(m[2]);
+    }
+
+    // Modales de positionnement (pas de mouvement associé)
+    const gVal = 'G' in words ? Math.round(words.G * 10) / 10 : null;
+    if (gVal === 90) { absolute = true;  continue; }
+    if (gVal === 91) { absolute = false; continue; }
+    // Ignorer tout G autre que 0 et 1 (G2/G3/G28/G92…)
+    if (gVal !== null && gVal !== 0 && gVal !== 1) continue;
+    if (gVal === 0 || gVal === 1) lastG = gVal;
+
+    // Ignorer les lignes sans mouvement (M-codes, S, T…)
+    if (!('X' in words) && !('Y' in words) && !('Z' in words)) continue;
+
+    // Calcul de la nouvelle position (absolu ou incrémental)
+    const nx = 'X' in words ? (absolute ? words.X : mx + words.X) : mx;
+    const ny = 'Y' in words ? (absolute ? words.Y : my + words.Y) : my;
+    const nz = 'Z' in words ? (absolute ? words.Z : mz + words.Z) : mz;
+
+    const type = lastG === 0 ? 'rapid' : 'feed';
+    moves.push({ x0:mx, y0:my, z0:mz, x1:nx, y1:ny, z1:nz, type });
+
+    if (type === 'feed') {
+      const dx=nx-mx, dy=ny-my, dz=nz-mz;
+      totalFeedLen += Math.sqrt(dx*dx + dy*dy + dz*dz);
+    }
+
+    mx=nx; my=ny; mz=nz;
+  }
+
+  return { moves, totalFeedLen };
+}
+
+// Calcule la boîte englobante d'un jeu de segments G-code
+function bboxOfMoves(moves) {
+  let xMin=Infinity,xMax=-Infinity,yMin=Infinity,yMax=-Infinity,zMin=Infinity,zMax=-Infinity;
+  for (const {x0,y0,z0,x1,y1,z1} of moves) {
+    for (const [x,y,z] of [[x0,y0,z0],[x1,y1,z1]]) {
+      if(x<xMin)xMin=x; if(x>xMax)xMax=x;
+      if(y<yMin)yMin=y; if(y>yMax)yMax=y;
+      if(z<zMin)zMin=z; if(z>zMax)zMax=z;
+    }
+  }
+  return {xMin,xMax,yMin,yMax,zMin,zMax};
 }
 
 // ── Affichage initial au chargement de la page ──
-// Montre le brut avec les dimensions par défaut (100×100×30 mm) avant tout import STL
+// Brut par défaut centré sur le 00, vue d'ensemble sur la surface machine
 updateStock();
-viewer.fitView({ xMin: -50, xMax: 50, yMin: -50, yMax: 50, zMin: 0, zMax: 30 });
+refreshGrid();
+// Vue d'ensemble : on cadre sur la surface machine complète, pas sur le seul brut
+(function initCamera() {
+  const omX = +$('omX').value, omY = +$('omY').value;
+  const mX  = +$('machineX').value, mY = +$('machineY').value;
+  const sZ  = +$('stockZ').value || 30;
+  viewer.fitView({ xMin: -omX, xMax: mX - omX, yMin: -omY, yMax: mY - omY, zMin: -sZ, zMax: 0 });
+})();
 
 </script>
 </body>

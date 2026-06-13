@@ -1,4 +1,4 @@
-# GCode 3D Generator
+# Magic GCode Generator
 
 > Application web **single-file** (HTML + CSS + JS) pour générer et visualiser du G-code d'usinage CNC 3 axes simultanés (X, Y, Z) à partir d'un fichier STL.  
 > **Aucun serveur requis** — tout tourne dans le navigateur, hors-ligne possible.
@@ -12,8 +12,8 @@
 
 ## Démo / Demo
 
-Télécharge `gcode3d-generator.html`, ouvre-le dans ton navigateur — c'est tout.  
-Download `gcode3d-generator.html`, open it in your browser — that's it.
+Télécharge `Magic_GCode_Generator.html`, ouvre-le dans ton navigateur — c'est tout.  
+Download `Magic_GCode_Generator.html`, open it in your browser — that's it.
 
 ---
 
@@ -22,12 +22,13 @@ Download `gcode3d-generator.html`, open it in your browser — that's it.
 | Fonctionnalité | Feature |
 |---|---|
 | Import STL binaire et ASCII | Binary and ASCII STL import |
+| **Import G-code** (.gcode .nc .tap .cnc) | **G-code import** (.gcode .nc .tap .cnc) |
 | Stratégies raster X, Y, croisé | Raster X, Y, crossed toolpaths |
 | Parcours 3 axes simultanés (G1 XYZ) | Simultaneous 3-axis motion (G1 XYZ) |
 | 5 modes d'origine pièce | 5 workpiece origin modes |
 | Visualisation brut (boîte translucide) | Stock block visualisation (translucent box) |
 | Compatibilité GRBL, Mach3/4, LinuxCNC | GRBL, Mach3/4, LinuxCNC compatibility |
-| Visualisation 3D Three.js (parcours + modèle) | Three.js 3D viewer (toolpath + model) |
+| Visualisation 3D Three.js — G0 jaune / G1 cyan | Three.js 3D viewer — G0 yellow / G1 cyan |
 | Calcul asynchrone avec barre de progression | Async computation with progress bar |
 | Export `.gcode` avec en-tête commenté | `.gcode` export with commented header |
 | Interface responsive, thème sombre | Responsive UI, dark theme |
@@ -37,14 +38,14 @@ Download `gcode3d-generator.html`, open it in your browser — that's it.
 ## Utilisation / Usage
 
 **FR :**  
-1. Télécharge `gcode3d-generator.html`  
+1. Télécharge `Magic_GCode_Generator.html`  
 2. Ouvre-le dans Chrome, Firefox ou Edge  
 3. Charge un fichier STL  
 4. Configure les paramètres (outil, avances, broche, pas latéral)  
 5. Clique **Générer** → visualise → télécharge le `.gcode`
 
 **EN :**  
-1. Download `gcode3d-generator.html`  
+1. Download `Magic_GCode_Generator.html`  
 2. Open it in Chrome, Firefox or Edge  
 3. Load an STL file  
 4. Set parameters (tool, feed rates, spindle, step-over)  
@@ -62,11 +63,21 @@ Download `gcode3d-generator.html`, open it in your browser — that's it.
 
 ## Changelog
 
+### v1.3c — [13/06/2026]
+- **Renommage** : fichier renommé `Magic_GCode_Generator.html`
+- **Brut positionné sur le 00** : coin bas-gauche du brut = position 00 (formule corner-dépendante partagée via `get00GCode()`)
+- **Repère OP suit le brut** : axes XYZ affichés au coin bas-gauche de la face supérieure, taille réduite (×0.12 au lieu de ×0.35)
+- **Vue initiale** : caméra ajustée sur l'ensemble machine au chargement, pas zoomed sur le brut seul
+- **Labels grille** : itération en coords machine (distances OM, toujours positives) → multiples corrects (200, 400, …) quelle que soit la position de l'OM
+- **Rendu glyphes** : canvas adaptatif (`Math.max(128, text.length×38+24)` × 96 px, police 56 px) → nombres 4 chiffres lisibles sans artefacts
+
 ### v1.3b — [13/06/2026]
+- **Import G-code** : bouton "Charger un fichier" accepte `.stl` et `.gcode/.nc/.tap/.cnc` — routage automatique par extension
+- **Visualisation G-code 3D** : parser modal G0/G1/G90/G91, segments colorés — G0 en jaune (rapides), G1 en cyan (coupes)
+- Statistiques à l'import : nb mouvements, dimensions zone usinée, longueur parcours coupe
 - Brut affiché par défaut au lancement (100×100×30 mm) avant tout import STL
-- Parcours outil en cyan vif (`#00E5FF`) — meilleure visibilité sur fond sombre
+- Parcours outil STL en cyan vif (`#00E5FF`) — meilleure visibilité sur fond sombre
 - Longueur du parcours affichée en mm (au lieu de m)
-- Commentaires du code enrichis pour faciliter la lecture par un tiers
 - Mentions de licence dans l'en-tête de chaque fichier G-code généré
 
 ### v1.3 — [11/06/2026]

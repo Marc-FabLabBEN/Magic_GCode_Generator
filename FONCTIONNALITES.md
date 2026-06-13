@@ -150,14 +150,17 @@ M30
 
 ### 🔵 Priorité haute
 
-#### V1.2 — Simulateur G-code (style NCViewer)
-- [ ] Import / collage d'un fichier G-code existant (pas seulement celui généré dans la session)
-- [ ] Parser G-code : G0 (rapide), G1 (coupe linéaire), gestion des modales F/S
-- [ ] Visualisation 3D distincte : **G0 en jaune pointillé**, G1 en dégradé coloré
+#### V1.2 — Visualiseur / Simulateur G-code
+- [x] Import d'un fichier G-code existant (.gcode .nc .tap) via le bouton "Charger un fichier"
+- [x] Parser G-code : machine d'état modale G0/G1, G90/G91, gestion des coordonnées X/Y/Z
+- [x] Visualisation 3D : **G0 en jaune** (rapides), **G1 en cyan** (coupes) — `LineSegments` vertex colors
+- [x] Statistiques : nb G0/G1, dimensions de la zone usinée, longueur parcours coupe
+- [x] Bouton générique "Charger un fichier" — routage automatique STL vs G-code par extension
 - [ ] **DRO (Digital Read Out)** : affichage X / Y / Z en temps réel pendant la simulation
 - [ ] Simulation animée : boutons ▶ Lecture / ⏸ Pause / ⏮ Début / ⏭ Fin
 - [ ] Curseur de progression sur la timeline du G-code
 - [ ] Surbrillance de la ligne G-code active dans un panneau texte
+- [ ] Support G2/G3 (arcs) dans le parser
 
 #### V1.3 — Gestion du brut et de l'origine
 
