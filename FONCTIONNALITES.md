@@ -239,11 +239,90 @@ Permettre de sauvegarder et sélectionner un profil machine, évitant de re-sais
 - [ ] Stockage local (`localStorage`) — les profils persistent entre sessions
 - [ ] Détection automatique si la pièce + brut dépassent la surface de travail de la machine sélectionnée
 
-#### V1.7 — Améliorations de l'interface
-- [ ] Sauvegarde / rechargement des réglages (JSON local, `localStorage`)
+#### V1.7 — Bibliothèque de paramètres utilisateur (fichier Markdown local)
+
+Permettre à l'utilisateur de conserver ses outils, matériaux et paramètres de coupe habituels dans un fichier Markdown lisible et portable, indépendant du navigateur.
+
+##### Principe général
+- L'utilisateur crée et édite un fichier `.md` sur son ordinateur (dans n'importe quel éditeur texte)
+- L'application le charge via un bouton "Importer mes paramètres"
+- Les données sont parsées et injectées dans l'interface (menus déroulants, champs pré-remplis)
+- Aucune donnée n'est envoyée sur un serveur — tout reste local
+
+##### Format du fichier `mes-parametres.md`
+
+```markdown
+# Mes paramètres CNC
+
+## Outils
+| Nom               | Diamètre (mm) | Type  | Avance XY (mm/min) | Plongée Z (mm/min) | Broche (tr/min) | Pas (%) |
+|-------------------|---------------|-------|--------------------|--------------------|-----------------|---------|
+| Fraise Ø6 finition | 6            | ball  | 850                | 300                | 14500           | 40      |
+| Fraise Ø8 ébauche  | 8            | flat  | 1200               | 400                | 12000           | 35      |
+| Graveur Ø1         | 1            | ball  | 400                | 150                | 20000           | 20      |
+
+## Matériaux
+| Matériau       | Avance XY (mm/min) | Plongée Z (mm/min) | Broche (tr/min) | Pas (%) |
+|----------------|--------------------|--------------------|-----------------|---------|
+| MDF 18 mm      | 850                | 300                | 14500           | 40      |
+| Contreplaqué   | 1000               | 350                | 13000           | 40      |
+| Aluminium      | 300                | 100                | 18000           | 20      |
+| Mousse EPP     | 2000               | 800                | 8000            | 50      |
+
+## Machines
+| Nom         | Surface X (mm) | Surface Y (mm) | Surface Z (mm) | Contrôleur |
+|-------------|----------------|----------------|----------------|------------|
+| CNC BEN     | 900            | 600            | 100            | grbl       |
+| Mini CNC    | 300            | 200            | 50             | grbl       |
+```
+
+##### Import — lecture du fichier
+- [ ] **Bouton "Importer mes paramètres"** : ouvre un sélecteur de fichier `.md`
+- [ ] **Parser Markdown** : extrait les tableaux Outils, Matériaux, Machines (regex sur les lignes `|...|`)
+- [ ] Tolérance aux variations de formatage (espaces, colonnes manquantes ou supplémentaires)
+- [ ] Les sections inconnues / commentaires libres du fichier sont conservés sans modification
+
+##### Utilisation dans l'interface
+- [ ] **Sélecteur Outil** : menu déroulant peuplé depuis la bibliothèque — sélectionner un outil remplit automatiquement diamètre, type, avance, plongée, broche, pas
+- [ ] **Sélecteur Matériau** : idem — la sélection d'un matériau surcharge les paramètres de coupe ou propose une fusion (outil + matériau → paramètres combinés)
+- [ ] **Sélecteur Machine** : peuple le nom, surface de travail et contrôleur (lien avec V1.6)
+- [ ] Les paramètres importés sont des valeurs de départ — l'utilisateur peut toujours les ajuster avant de générer
+
+##### Mise à jour du fichier (sans tout réécrire)
+
+C'est le point critique : réécrire le fichier entier à chaque export casserait les modifications manuelles de l'utilisateur (commentaires, formatage personnel, sections libres). La stratégie retenue est une **fusion par nom unique** :
+
+1. L'application charge le fichier MD existant en mémoire → parse les tableaux en objets
+2. L'utilisateur modifie les réglages dans l'interface
+3. Il clique **"+ Ajouter à ma bibliothèque"** (bouton à côté de chaque section Outil / Matériau / Machine) :
+   - Si une entrée du **même nom** existe déjà → proposition : *Remplacer / Annuler*
+   - Si le nom est nouveau → ajout d'une ligne dans le tableau correspondant
+4. **"Enregistrer ma bibliothèque"** : re-sérialise **uniquement les tableaux** reconnus (Outils, Matériaux, Machines), en conservant intactes toutes les autres sections du fichier (texte libre, titres personnalisés, commentaires)
+5. Téléchargement du fichier `.md` mis à jour — l'utilisateur remplace son fichier local
+
+- [ ] Bouton **"+ Ajouter cet outil"** dans la section Outil (actif dès qu'un fichier est importé)
+- [ ] Bouton **"+ Ajouter ce matériau"** dans la section Paramètres de coupe
+- [ ] Bouton **"+ Ajouter cette machine"** dans la section Machine
+- [ ] Chaque ajout demande un **nom** si le champ nom est vide
+- [ ] Détection de doublon par nom (insensible à la casse) → confirmation avant écrasement
+- [ ] **"Enregistrer ma bibliothèque"** : fusion + re-sérialisation + téléchargement `.md`
+- [ ] Indicateur visuel de l'état de la bibliothèque : "3 outils · 2 matériaux · 1 machine · non sauvegardé ●"
+
+##### Compatibilité et portabilité
+- [ ] Le fichier `.md` est lisible et éditable dans n'importe quel éditeur texte (Notepad, VS Code, Obsidian…)
+- [ ] Le format des tableaux est stable et documenté — l'utilisateur peut ajouter des lignes manuellement en respectant la syntaxe
+- [ ] Envisager un fichier `exemple-parametres.md` fourni avec le projet comme modèle de départ
+
+##### Points d'attention
+- La **clé d'unicité est le nom** de l'entrée (colonne 1 de chaque tableau) — il doit être explicite et unique dans sa catégorie
+- Un outil et un matériau peuvent avoir le même nom sans conflit (catégories séparées)
+- Fusion outil + matériau : ex. "Fraise Ø6 sur Aluminium" → paramètres Matériau prioritaires sur ceux de l'outil (la matière prime sur l'outil)
+
+#### V1.8 — Améliorations de l'interface
 - [ ] Prévisualisation du nombre de points estimé avant calcul (avertissement si trop long)
 - [ ] Outil de mesure dans la vue 3D (distance entre deux points cliqués)
 - [ ] Vue en coupe Z (plan de coupe glissant)
+- [ ] Sauvegarde de session (`localStorage`) : recharge les derniers réglages à l'ouverture
 
 ### 🟢 Priorité basse / expérimental
 
@@ -285,4 +364,4 @@ gcode3d-generator.html
 ---
 
 *Document maintenu par Marc FONTAINE — FabLab BEN / Coop Alpha*
-*Dernière mise à jour : [11/06/2026] — V1.3 livrée (brut, origine, corrections) ; V1.6 profils machines ajoutée à la road map*
+*Dernière mise à jour : [13/06/2026] — V1.3b livrée (parcours cyan, brut par défaut, commentaires) ; V1.7 bibliothèque paramètres MD ajoutée ; V1.7 ancienne → V1.8*

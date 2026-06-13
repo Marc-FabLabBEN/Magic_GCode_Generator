@@ -95,6 +95,7 @@ Prochaines étapes prioritaires / Next priority milestones :
 - **V1.4** — Multi-passes (profondeur de passe, Z-level / depth per pass, Z-level)
 - **V1.5** — Import SVG / DXF (usinage 2D+ / 2.5D machining)
 - **V1.6** — Profils machines (machine profiles, localStorage)
+- **V1.7** — Bibliothèque de paramètres utilisateur (fichier `.md` local : outils, matériaux, machines / user parameter library via local `.md` file)
 
 ---
 
